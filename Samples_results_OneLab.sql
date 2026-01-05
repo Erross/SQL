@@ -1,9 +1,13 @@
-SELECT
-  COUNT(*) AS matched_rows,
-  SUM(CASE WHEN m.raw_data IS NOT NULL THEN 1 ELSE 0 END) AS matched_raw_data_not_null,
-  SUM(CASE WHEN m.raw_data_long_text IS NOT NULL THEN 1 ELSE 0 END) AS matched_raw_data_long_not_null
-FROM hub_owner.res_measurementsample ms
-JOIN hub_owner.sam_sample s
-  ON ms.sample_id = s.sample_id
-JOIN hub_owner.res_measurement m
-  ON m.id = ms.measurement_id;
+SELECT column_name, data_type, data_length
+FROM all_tab_columns
+WHERE owner = 'HUB_OWNER'
+  AND table_name = 'RES_MEASUREMENT'
+  AND (
+    UPPER(column_name) LIKE '%RAW%' OR
+    UPPER(column_name) LIKE '%DATA%' OR
+    UPPER(column_name) LIKE '%JSON%' OR
+    UPPER(column_name) LIKE '%TEXT%' OR
+    UPPER(column_name) LIKE '%RESULT%' OR
+    UPPER(column_name) LIKE '%PAYLOAD%'
+  )
+ORDER BY column_name;
