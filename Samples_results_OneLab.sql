@@ -1,7 +1,10 @@
 /*
 Grain:
-- With tasks: (sample, runset, task)
-- With measurements joined via RES_MEASUREMENTSAMPLE: (sample, runset, task, measurement)
+(sample, runset, task, measurement, result_item)
+
+Goal:
+Return ONLY parsed results from m.raw_data(_long_text):
+$.results[*].value (+name/unit if present)
 */
 
 WITH sample_props AS (
@@ -91,18 +94,15 @@ SELECT
 
   rp.name            AS task_plan_project,
   t.life_cycle_state AS task_status,
-
   t.task_id          AS task_id,
   t.task_name        AS task_name,
 
-  -- results (measurement) joined via mapped sample
   m.id               AS measurement_id,
-  m.record_date      AS measurement_record_date,
-  m.record_name      AS measurement_record_name,
-  m.measurement_type AS measurement_type,
 
-  m.raw_data                                    AS result_payload_short,
-  DBMS_LOB.SUBSTR(m.raw_data_long_text, 4000, 1) AS result_payload_long_4k
+  -- ✅ ONLY results:
+  jt.result_name,
+  jt.result_value,
+  jt.result_unit_urn
 
 FROM hub_owner.sam_sample s
 JOIN hub_owner.req_runset_sample rss
@@ -121,11 +121,23 @@ LEFT JOIN hub_owner.sec_user u
 LEFT JOIN sample_props sp
   ON sp.sample_raw_id = s.id
 
--- ✅ correct measurement path in your schema:
 LEFT JOIN hub_owner.res_measurementsample ms
   ON ms.mapped_sample_id = s.id
 LEFT JOIN hub_owner.res_measurement m
   ON m.id = ms.measurement_id
 
+-- explode $.results[*]
+CROSS APPLY JSON_TABLE(
+  COALESCE(m.raw_data_long_text, m.raw_data),
+  '$.results[*]'
+  COLUMNS (
+    result_name      VARCHAR2(200)  PATH '$.name',
+    result_value     VARCHAR2(4000) PATH '$.value',
+    result_unit_urn  VARCHAR2(4000) PATH '$.unit.urn'
+  )
+) jt
+
+WHERE jt.result_value IS NOT NULL
+
 ORDER BY
-  s.name, s.sample_id, t.task_id, m.id;
+  s.name, s.sample_id, t.task_id, m.id, jt.result_name;
