@@ -97,7 +97,7 @@ SELECT
 
   m.id               AS measurement_id,
 
-  -- ✅ ONLY results:
+  -- ONLY results:
   jt.result_name,
   jt.result_value,
   jt.result_unit_urn
@@ -126,14 +126,16 @@ LEFT JOIN hub_owner.res_measurement m
 
 CROSS APPLY JSON_TABLE(
   CASE
-    WHEN m.raw_data_long_text IS NOT NULL THEN m.raw_data_long_text
-    ELSE TO_CLOB(m.raw_data)
-  END,
+    WHEN m.raw_data_long_text IS NOT NULL THEN CAST(m.raw_data_long_text AS CLOB)
+    WHEN m.raw_data           IS NOT NULL THEN CAST(m.raw_data           AS CLOB)
+    ELSE CAST(NULL AS CLOB)
+  END
+  FORMAT JSON,
   '$.results[*]'
   COLUMNS (
-    result_name      VARCHAR2(200)  PATH '$.name',
-    result_value     VARCHAR2(4000) PATH '$.value',
-    result_unit_urn  VARCHAR2(4000) PATH '$.unit.urn'
+    result_name      VARCHAR2(200)   PATH '$.name',
+    result_value     VARCHAR2(4000)  PATH '$.value',
+    result_unit_urn  VARCHAR2(4000)  PATH '$.unit.urn'
   )
 ) jt
 
