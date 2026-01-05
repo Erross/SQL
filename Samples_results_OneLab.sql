@@ -1,4 +1,7 @@
-/* Returns only parsed results from $.results[*] */
+/*
+Grain:
+(sample, measurement, result_item) with optional runset/task columns when present
+*/
 
 WITH sample_props AS (
   SELECT
@@ -49,14 +52,22 @@ WITH sample_props AS (
         END) AS spec_group
 
   FROM hub_owner.cor_class_identity ci
-  JOIN hub_owner.cor_object_identity oi ON oi.class_identity_id = ci.id
-  JOIN hub_owner.cor_property_value pv  ON pv.object_identity_id = oi.id
-  JOIN hub_owner.cor_property p         ON p.name = pv.property_id
+  JOIN hub_owner.cor_object_identity oi
+    ON oi.class_identity_id = ci.id
+  JOIN hub_owner.cor_property_value pv
+    ON pv.object_identity_id = oi.id
+  JOIN hub_owner.cor_property p
+    ON p.name = pv.property_id
   WHERE ci.table_name = 'sam_sample'
     AND p.display_label IN (
-      'Sampling Point','Sampling Point Description','Line',
-      'Product Code','Product Description',
-      'Cig Product Code','Cig Product Description','Spec group'
+      'Sampling Point',
+      'Sampling Point Description',
+      'Line',
+      'Product Code',
+      'Product Description',
+      'Cig Product Code',
+      'Cig Product Description',
+      'Spec group'
     )
   GROUP BY oi.object_id
 )
@@ -77,6 +88,7 @@ SELECT
   sp.cig_product_description,
   sp.spec_group,
 
+  -- optional task/runset info (won't zero the dataset if absent)
   rp.name            AS task_plan_project,
   t.life_cycle_state AS task_status,
   t.task_id          AS task_id,
@@ -84,24 +96,35 @@ SELECT
 
   m.id               AS measurement_id,
 
+  -- results ONLY (parsed)
   jt.result_name,
   jt.result_value,
   jt.result_unit_urn
 
 FROM hub_owner.sam_sample s
-JOIN hub_owner.req_runset_sample rss ON rss.sample_id = s.id
-JOIN hub_owner.req_runset rs         ON rs.id = rss.runset_id
-JOIN hub_owner.req_task t            ON t.runset_id = rs.id
 
-LEFT JOIN hub_owner.res_project rp ON rp.id = rs.project_id
-LEFT JOIN hub_owner.sec_user u     ON u.id = s.owner_id
-LEFT JOIN sample_props sp          ON sp.sample_raw_id = s.id
+LEFT JOIN hub_owner.sec_user u
+  ON u.id = s.owner_id
 
-LEFT JOIN hub_owner.res_measurementsample ms ON ms.mapped_sample_id = s.id
-LEFT JOIN hub_owner.res_measurement m        ON m.id = ms.measurement_id
+LEFT JOIN sample_props sp
+  ON sp.sample_raw_id = s.id
 
--- keep OUTER APPLY so bad JSON / missing results doesn't wipe the rowset during testing;
--- you can swap to CROSS APPLY once you're certain every measurement has results.
+-- measurements mapped to sample
+JOIN hub_owner.res_measurementsample ms
+  ON ms.mapped_sample_id = s.id
+JOIN hub_owner.res_measurement m
+  ON m.id = ms.measurement_id
+
+-- task chain made optional
+LEFT JOIN hub_owner.req_runset_sample rss
+  ON rss.sample_id = s.id
+LEFT JOIN hub_owner.req_runset rs
+  ON rs.id = rss.runset_id
+LEFT JOIN hub_owner.req_task t
+  ON t.runset_id = rs.id
+LEFT JOIN hub_owner.res_project rp
+  ON rp.id = rs.project_id
+
 OUTER APPLY JSON_TABLE(
   NVL(m.raw_data_long_text, TO_CLOB(m.raw_data)),
   '$.results[*]'
@@ -113,4 +136,6 @@ OUTER APPLY JSON_TABLE(
 ) jt
 
 WHERE jt.result_value IS NOT NULL
-ORDER BY s.name, s.sample_id, t.task_id, m.id, jt.result_name;
+
+ORDER BY
+  s.name, s.sample_id, m.id, jt.result_name, t.task_id;
