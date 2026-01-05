@@ -1,10 +1,10 @@
 /*
 Grain:
-(sample, runset, task, measurement, result_item)
+(sample, runset, task, measurement)  -- measurement is via mapped sample
 
-Assumes:
-- For most measurements, $.results is an ARRAY (your counts confirm this)
-- Guarded so non-array / missing results don't error
+Returns:
+- m.raw_data (short)
+- first 4000 chars of m.raw_data_long_text (long)
 */
 
 WITH sample_props AS (
@@ -74,100 +74,58 @@ WITH sample_props AS (
       'Spec group'
     )
   GROUP BY oi.object_id
-),
-
-measurement_docs AS (
-  SELECT
-    s.id        AS sample_internal_id,
-    s.name      AS sample_name,
-    s.sample_id AS sample_id,
-
-    u.name AS owner,
-
-    sp.sampling_point,
-    sp.sampling_point_description,
-    sp.line,
-    sp.product_code,
-    sp.product_description,
-    sp.cig_product_code,
-    sp.cig_product_description,
-    sp.spec_group,
-
-    rs.id        AS runset_id,
-    rp.name      AS task_plan_project,
-    t.task_id    AS task_id,
-    t.task_name  AS task_name,
-    t.life_cycle_state AS task_status,
-
-    m.id AS measurement_id,
-
-    NVL(m.raw_data_long_text, TO_CLOB(m.raw_data)) AS doc
-
-  FROM hub_owner.sam_sample s
-  LEFT JOIN hub_owner.sec_user u
-    ON u.id = s.owner_id
-  LEFT JOIN sample_props sp
-    ON sp.sample_raw_id = s.id
-
-  -- measurements mapped to samples
-  JOIN hub_owner.res_measurementsample ms
-    ON ms.mapped_sample_id = s.id
-  JOIN hub_owner.res_measurement m
-    ON m.id = ms.measurement_id
-
-  -- optional task chain (won't wipe out samples with results)
-  LEFT JOIN hub_owner.req_runset_sample rss
-    ON rss.sample_id = s.id
-  LEFT JOIN hub_owner.req_runset rs
-    ON rs.id = rss.runset_id
-  LEFT JOIN hub_owner.req_task t
-    ON t.runset_id = rs.id
-  LEFT JOIN hub_owner.res_project rp
-    ON rp.id = rs.project_id
 )
 
 SELECT
-  md.sample_name,
-  md.sample_id,
+  s.name      AS sample_name,
+  s.sample_id AS sample_id,
 
-  md.sampling_point,
-  md.sampling_point_description,
-  md.line,
+  sp.sampling_point,
+  sp.sampling_point_description,
+  sp.line,
 
-  md.owner,
+  u.name AS owner,
 
-  md.product_code,
-  md.product_description,
-  md.cig_product_code,
-  md.cig_product_description,
-  md.spec_group,
+  sp.product_code,
+  sp.product_description,
+  sp.cig_product_code,
+  sp.cig_product_description,
+  sp.spec_group,
 
-  md.task_plan_project,
-  md.task_status,
-  md.task_id,
-  md.task_name,
+  rp.name            AS task_plan_project,
+  t.life_cycle_state AS task_status,
 
-  md.measurement_id,
+  t.task_id          AS task_id,
+  t.task_name        AS task_name,
 
-  jt.result_name,
-  jt.result_value,
-  jt.result_unit_urn
+  m.id               AS measurement_id,
 
-FROM measurement_docs md
+  -- payload fields that actually have data
+  m.raw_data AS result_payload_short,
+  DBMS_LOB.SUBSTR(m.raw_data_long_text, 4000, 1) AS result_payload_long_4k
 
--- ✅ only attempt JSON_TABLE when results is actually an array
-CROSS APPLY JSON_TABLE(
-  md.doc,
-  '$.results[*]'
-  COLUMNS (
-    result_name      VARCHAR2(200)   PATH '$.name'     NULL ON ERROR,
-    result_value     VARCHAR2(4000)  PATH '$.value'    NULL ON ERROR,
-    result_unit_urn  VARCHAR2(4000)  PATH '$.unit.urn' NULL ON ERROR
-  )
-) jt
+FROM hub_owner.sam_sample s
+JOIN hub_owner.req_runset_sample rss
+  ON rss.sample_id = s.id
+JOIN hub_owner.req_runset rs
+  ON rs.id = rss.runset_id
+JOIN hub_owner.req_task t
+  ON t.runset_id = rs.id
 
-WHERE JSON_EXISTS(md.doc, '$.results[0]')   -- guard: only array results
-  AND jt.result_value IS NOT NULL
+LEFT JOIN hub_owner.res_project rp
+  ON rp.id = rs.project_id
+
+LEFT JOIN hub_owner.sec_user u
+  ON u.id = s.owner_id
+
+LEFT JOIN sample_props sp
+  ON sp.sample_raw_id = s.id
+
+-- measurement linkage via mapped sample
+LEFT JOIN hub_owner.res_measurementsample ms
+  ON ms.mapped_sample_id = s.id
+LEFT JOIN hub_owner.res_measurement m
+  ON m.id = ms.measurement_id
 
 ORDER BY
-  md.sample_name, md.sample_id, md.measurement_id, jt.result_name, md.task_id;
+  s.name, s.sample_id, t.task_id, m.id;
