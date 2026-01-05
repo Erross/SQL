@@ -125,8 +125,11 @@ LEFT JOIN hub_owner.res_measurement m
   ON m.id = ms.measurement_id
 
 CROSS APPLY JSON_TABLE(
-  NVL(m.raw_data_long_text, TO_CLOB(m.raw_data)),
-  '$.results[*]'
+  JSON_VALUE(
+    NVL(m.raw_data_long_text, TO_CLOB(m.raw_data)),
+    '$.results' RETURNING CLOB
+  ),
+  '$[*]'
   COLUMNS (
     result_name      VARCHAR2(200)   PATH '$.name',
     result_value     VARCHAR2(4000)  PATH '$.value',
