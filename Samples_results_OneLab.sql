@@ -1,7 +1,7 @@
 /*
 Grain:
 - With tasks: (sample, runset, task)
-- With measurements: still (sample, runset, task) unless you explode the payload
+- With measurements joined via RES_MEASUREMENTSAMPLE: (sample, runset, task, measurement)
 */
 
 WITH sample_props AS (
@@ -92,13 +92,16 @@ SELECT
   rp.name            AS task_plan_project,
   t.life_cycle_state AS task_status,
 
-  -- measurement linkage (this is where results actually live in your tenant)
   t.task_id          AS task_id,
   t.task_name        AS task_name,
-  m.id               AS measurement_id,
 
-  -- raw payload (often JSON)
-  m.raw_data                                 AS result_payload_short,
+  -- results (measurement) joined via mapped sample
+  m.id               AS measurement_id,
+  m.record_date      AS measurement_record_date,
+  m.record_name      AS measurement_record_name,
+  m.measurement_type AS measurement_type,
+
+  m.raw_data                                    AS result_payload_short,
   DBMS_LOB.SUBSTR(m.raw_data_long_text, 4000, 1) AS result_payload_long_4k
 
 FROM hub_owner.sam_sample s
@@ -118,12 +121,11 @@ LEFT JOIN hub_owner.sec_user u
 LEFT JOIN sample_props sp
   ON sp.sample_raw_id = s.id
 
-LEFT JOIN hub_owner.res_measurement m
-  ON m.id = t.measurement_id
-
+-- ✅ correct measurement path in your schema:
 LEFT JOIN hub_owner.res_measurementsample ms
-  ON ms.measurement_id = m.id
- AND ms.mapped_sample_id = s.id
+  ON ms.mapped_sample_id = s.id
+LEFT JOIN hub_owner.res_measurement m
+  ON m.id = ms.measurement_id
 
 ORDER BY
-  s.name, s.sample_id, t.task_id;
+  s.name, s.sample_id, t.task_id, m.id;
