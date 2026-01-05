@@ -2,9 +2,7 @@
 Grain:
 (sample, runset, task, measurement, result_item)
 
-Goal:
-Return ONLY parsed results from m.raw_data(_long_text):
-$.results[*].value (+name/unit if present)
+Returns only parsed results from $.results[*]
 */
 
 WITH sample_props AS (
@@ -126,9 +124,11 @@ LEFT JOIN hub_owner.res_measurementsample ms
 LEFT JOIN hub_owner.res_measurement m
   ON m.id = ms.measurement_id
 
--- explode $.results[*]
 CROSS APPLY JSON_TABLE(
-  COALESCE(m.raw_data_long_text, m.raw_data),
+  CASE
+    WHEN m.raw_data_long_text IS NOT NULL THEN m.raw_data_long_text
+    ELSE TO_CLOB(m.raw_data)
+  END,
   '$.results[*]'
   COLUMNS (
     result_name      VARCHAR2(200)  PATH '$.name',
