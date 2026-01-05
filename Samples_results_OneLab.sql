@@ -97,7 +97,7 @@ SELECT
 
   m.id               AS measurement_id,
 
-  -- ONLY results:
+  -- results only
   jt.result_name,
   jt.result_value,
   jt.result_unit_urn
@@ -125,12 +125,7 @@ LEFT JOIN hub_owner.res_measurement m
   ON m.id = ms.measurement_id
 
 CROSS APPLY JSON_TABLE(
-  CASE
-    WHEN m.raw_data_long_text IS NOT NULL THEN CAST(m.raw_data_long_text AS CLOB)
-    WHEN m.raw_data           IS NOT NULL THEN CAST(m.raw_data           AS CLOB)
-    ELSE CAST(NULL AS CLOB)
-  END
-  FORMAT JSON,
+  NVL(m.raw_data_long_text, TO_CLOB(m.raw_data)),
   '$.results[*]'
   COLUMNS (
     result_name      VARCHAR2(200)   PATH '$.name',
