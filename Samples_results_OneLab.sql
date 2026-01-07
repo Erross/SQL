@@ -565,3 +565,142 @@ WHERE rt.TASK_NAME = 'QAP_PACK_OV'
   AND REGEXP_SUBSTR(rt.SAMPLE_LIST, '[^,]+', 1, pv.ITEM_INDEX + 1) IN ('S000200', 'S000199')
   
 ORDER BY s.SAMPLE_ID, pv.ITEM_INDEX;
+
+--FINAL FOR 2 SAMPLES
+
+-- ========================================
+-- FINAL REPORT QUERY
+-- Exact column names as specified
+-- ========================================
+
+WITH sample_properties AS (
+  SELECT
+    oi.object_id AS sample_raw_id,
+    
+    MAX(CASE WHEN p.display_label = 'Sampling Point'
+             THEN COALESCE(pv.string_value,
+                           DBMS_LOB.SUBSTR(pv.long_string_value, 4000, 1),
+                           TO_CHAR(pv.number_value))
+        END) AS sampling_point,
+    
+    MAX(CASE WHEN p.display_label = 'Sampling Point Description'
+             THEN COALESCE(pv.string_value,
+                           DBMS_LOB.SUBSTR(pv.long_string_value, 4000, 1))
+        END) AS sampling_point_description,
+    
+    MAX(CASE WHEN p.display_label = 'Line'
+             THEN COALESCE(pv.string_value,
+                           DBMS_LOB.SUBSTR(pv.long_string_value, 4000, 1),
+                           TO_CHAR(pv.number_value))
+        END) AS line,
+    
+    MAX(CASE WHEN p.display_label = 'Product Code'
+             THEN COALESCE(pv.string_value,
+                           DBMS_LOB.SUBSTR(pv.long_string_value, 4000, 1),
+                           TO_CHAR(pv.number_value))
+        END) AS product_code,
+    
+    MAX(CASE WHEN p.display_label = 'Product Description'
+             THEN COALESCE(pv.string_value,
+                           DBMS_LOB.SUBSTR(pv.long_string_value, 4000, 1))
+        END) AS product_description,
+    
+    MAX(CASE WHEN p.display_label = 'Cig Product Code'
+             THEN COALESCE(pv.string_value,
+                           DBMS_LOB.SUBSTR(pv.long_string_value, 4000, 1),
+                           TO_CHAR(pv.number_value))
+        END) AS cig_product_code,
+    
+    MAX(CASE WHEN p.display_label = 'Cig Product Description'
+             THEN COALESCE(pv.string_value,
+                           DBMS_LOB.SUBSTR(pv.long_string_value, 4000, 1))
+        END) AS cig_product_description,
+    
+    MAX(CASE WHEN p.display_label = 'Spec group'
+             THEN COALESCE(pv.string_value,
+                           DBMS_LOB.SUBSTR(pv.long_string_value, 4000, 1))
+        END) AS spec_group
+        
+  FROM cor_class_identity ci
+  JOIN cor_object_identity oi ON oi.class_identity_id = ci.id
+  JOIN cor_property_value pv ON pv.object_identity_id = oi.id
+  JOIN cor_property p ON p.name = pv.property_id
+  WHERE ci.table_name = 'sam_sample'
+    AND p.display_label IN (
+      'Sampling Point',
+      'Sampling Point Description', 
+      'Line',
+      'Product Code',
+      'Product Description',
+      'Cig Product Code',
+      'Cig Product Description',
+      'Spec group'
+    )
+  GROUP BY oi.object_id
+)
+
+SELECT 
+    s.NAME as "Sample Name",
+    s.SAMPLE_ID as "Sample ID",
+    ms.SAMPLE_ID as "Master Sample ID",
+    sp.sampling_point as "Sampling point",
+    sp.sampling_point_description as "Sampling point description",
+    sp.line as "LINE-1",
+    u.NAME as "Owner",
+    sp.product_code as "Product Code",
+    sp.product_description as "Product Description",
+    sp.cig_product_code as "CIG_PRODUCT_CODE",
+    sp.cig_product_description as "CIG_PRODUCT_DESCRIPTION",
+    sp.spec_group as "Spec_Group",
+    proj.NAME as "Task Plan Project",
+    rt.LIFE_CYCLE_STATE as "Task Status",
+    p.NAME as "Characteristic",
+    pv.INTERPRETATION as "Compose Details",
+    pv.VALUE_STRING as "Result",
+    pv.VALUE_TEXT as "Formatted result"
+    
+FROM COR_PARAMETER_VALUE pv
+JOIN COR_PARAMETER p ON pv.PARENT_IDENTITY = p.ID
+JOIN REQ_TASK_PARAMETER rtp ON p.ID = rtp.PARAMETER_ID
+JOIN REQ_TASK rt ON rtp.TASK_ID = rt.ID
+LEFT JOIN REQ_RUNSET runset ON rt.RUNSET_ID = runset.ID
+LEFT JOIN REQ_ACTIVITY ra ON rt.ACTIVITY_ID = ra.ID
+LEFT JOIN SAM_SPEC_METHOD sm ON rt.SPECIFICATION_METHOD_ID = sm.ID
+LEFT JOIN SAM_SPEC_MTHD_CHAR smc ON sm.ID = smc.SPECIFICATION_METHOD_ID AND smc.PARAMETER_ID = p.ID
+LEFT JOIN SAM_SAMPLE s ON s.SAMPLE_ID = REGEXP_SUBSTR(rt.SAMPLE_LIST, '[^,]+', 1, pv.ITEM_INDEX + 1)
+LEFT JOIN SAM_SAMPLE ms ON s.MASTER_SAMPLE_ID = ms.ID
+LEFT JOIN SEC_USER u ON s.OWNER_ID = u.ID
+LEFT JOIN RES_PROJECT proj ON s.PROJECT_ID = proj.ID
+LEFT JOIN sample_properties sp ON sp.sample_raw_id = s.ID
+
+WHERE rt.TASK_NAME = 'QAP_PACK_OV'
+  AND p.NAME = 'Percent'
+  AND pv.VALUE_KEY = 'A'
+  AND REGEXP_SUBSTR(rt.SAMPLE_LIST, '[^,]+', 1, pv.ITEM_INDEX + 1) IN ('S000200', 'S000199')
+  
+ORDER BY s.SAMPLE_ID;
+
+
+-- ========================================
+-- COLUMN MAPPINGS
+-- ========================================
+/*
+Sample Name              -> SAM_SAMPLE.NAME
+Sample ID                -> SAM_SAMPLE.SAMPLE_ID
+Master Sample ID         -> Master SAM_SAMPLE.SAMPLE_ID (via MASTER_SAMPLE_ID FK)
+Sampling point           -> Property: 'Sampling Point'
+Sampling point description -> Property: 'Sampling Point Description'
+LINE-1                   -> Property: 'Line'
+Owner                    -> SEC_USER.NAME
+Product Code             -> Property: 'Product Code'
+Product Description      -> Property: 'Product Description'
+CIG_PRODUCT_CODE         -> Property: 'Cig Product Code'
+CIG_PRODUCT_DESCRIPTION  -> Property: 'Cig Product Description'
+Spec_Group               -> Property: 'Spec group'
+Task Plan Project        -> RES_PROJECT.NAME
+Task Status              -> REQ_TASK.LIFE_CYCLE_STATE
+Characteristic           -> COR_PARAMETER.NAME
+Compose Details          -> COR_PARAMETER_VALUE.INTERPRETATION
+Result                   -> COR_PARAMETER_VALUE.VALUE_STRING (full precision: 41.0229645...)
+Formatted result         -> COR_PARAMETER_VALUE.VALUE_TEXT (rounded: 41.02)
+*/
