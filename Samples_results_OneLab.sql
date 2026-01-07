@@ -177,159 +177,93 @@ WHERE rt.TASK_NAME = 'QAP_PACK_OV'
   )
 ORDER BY pv.ITEM_INDEX;
 
-/*
-Grain:
-(sample, runset, task, parameter_value_row)
+SELECT 
+    -- Sample Information
+    REGEXP_SUBSTR(rt.SAMPLE_LIST, '[^,]+', 1, pv.ITEM_INDEX + 1) as "Sample ID",
+    s.NAME as "Sample Name",
+    s.SAMPLE_ID as "Sample ID Verified",
+    ms.SAMPLE_ID as "Master Sample ID",
+    
+    -- Sampling Point Information
+    sl.NAME as "Sampling Point",
+    sl.DESCRIPTION as "Sampling Point Description",
+    
+    -- Location
+    loc.NAME as "Location",
+    
+    -- Owner Information (Line-1 Owner)
+    u.FULL_NAME as "Line-1 Owner",
+    
+    -- Project Information
+    proj.NAME as "Project",
+    proj.PROJECT_CODE as "Project Code",
+    
+    -- Task Plan Information
+    runset.NAME as "Task Plan",
+    runset.RUNSET_ID as "Task Plan ID",
+    
+    -- Task Information
+    rt.TASK_ID as "Task ID",
+    rt.TASK_NAME as "Task Name",
+    rt.METHOD_ID as "Method ID",
+    rt.LIFE_CYCLE_STATE as "Task Status",
+    rt.COMPLETION_DATE as "Task Completion Date",
+    
+    -- Activity Information
+    ra.NAME as "Activity Name",
+    
+    -- Specification Method
+    sm.NAME as "Spec Method Name",
+    sm.METHOD_ID as "Spec Method ID",
+    
+    -- Characteristic/Spec Group Information
+    smc.COMPONENT as "Spec Group",
+    p.NAME as "Characteristic",
+    p.DESCRIPTION as "Characteristic Description",
+    
+    -- Result Information
+    pv.VALUE_KEY as "Result Key",
+    pv.VALUE_NUMERIC as "Result",
+    pv.VALUE_TEXT as "Formatted Result",
+    pv.INTERPRETATION as "Compose Details",
+    
+    -- Additional Context
+    pv.ITEM_INDEX as "Item Index",
+    rt.SAMPLE_LIST as "Sample List"
+    
+FROM COR_PARAMETER_VALUE pv
+JOIN COR_PARAMETER p ON pv.PARENT_IDENTITY = p.ID
+JOIN REQ_TASK_PARAMETER rtp ON p.ID = rtp.PARAMETER_ID
+JOIN REQ_TASK rt ON rtp.TASK_ID = rt.ID
 
-Results path (working in your tenant):
-REQ_TASK -> REQ_TASK_PARAMETER -> COR_PARAMETER -> COR_PARAMETER_VALUE
-Sample linkage:
-REGEXP_SUBSTR(REQ_TASK.SAMPLE_LIST, '[^,]+', 1, ITEM_INDEX+1) = SAM_SAMPLE.SAMPLE_ID
-*/
+-- Runset/Task Plan
+LEFT JOIN REQ_RUNSET runset ON rt.RUNSET_ID = runset.ID
 
-WITH sample_props AS (
-  SELECT
-    oi.object_id AS sample_raw_id,
+-- Activity
+LEFT JOIN REQ_ACTIVITY ra ON rt.ACTIVITY_ID = ra.ID
 
-    MAX(CASE WHEN p.display_label = 'Sampling Point'
-             THEN COALESCE(pv.string_value,
-                           DBMS_LOB.SUBSTR(pv.long_string_value, 4000, 1),
-                           TO_CHAR(pv.number_value))
-        END) AS sampling_point,
+-- Specification Method and Characteristics
+LEFT JOIN SAM_SPEC_METHOD sm ON rt.SPECIFICATION_METHOD_ID = sm.ID
+LEFT JOIN SAM_SPEC_MTHD_CHAR smc ON sm.ID = smc.SPECIFICATION_METHOD_ID AND smc.PARAMETER_ID = p.ID
 
-    MAX(CASE WHEN p.display_label = 'Sampling Point Description'
-             THEN COALESCE(pv.string_value,
-                           DBMS_LOB.SUBSTR(pv.long_string_value, 4000, 1))
-        END) AS sampling_point_description,
+-- Now join to actual SAM_SAMPLE using the parsed sample ID
+LEFT JOIN SAM_SAMPLE s ON s.SAMPLE_ID = REGEXP_SUBSTR(rt.SAMPLE_LIST, '[^,]+', 1, pv.ITEM_INDEX + 1)
 
-    MAX(CASE WHEN p.display_label = 'Line'
-             THEN COALESCE(pv.string_value,
-                           DBMS_LOB.SUBSTR(pv.long_string_value, 4000, 1),
-                           TO_CHAR(pv.number_value))
-        END) AS line,
+-- Master Sample
+LEFT JOIN SAM_SAMPLE ms ON s.MASTER_SAMPLE_ID = ms.ID
 
-    MAX(CASE WHEN p.display_label = 'Product Code'
-             THEN COALESCE(pv.string_value,
-                           DBMS_LOB.SUBSTR(pv.long_string_value, 4000, 1),
-                           TO_CHAR(pv.number_value))
-        END) AS product_code,
+-- Locations
+LEFT JOIN RES_LOCATION sl ON s.SAMPLING_LOCATION_ID = sl.ID
+LEFT JOIN RES_LOCATION loc ON s.LOCATION_ID = loc.ID
 
-    MAX(CASE WHEN p.display_label = 'Product Description'
-             THEN COALESCE(pv.string_value,
-                           DBMS_LOB.SUBSTR(pv.long_string_value, 4000, 1))
-        END) AS product_description,
+-- Owner
+LEFT JOIN SEC_USER u ON s.OWNER_ID = u.ID
 
-    MAX(CASE WHEN p.display_label = 'Cig Product Code'
-             THEN COALESCE(pv.string_value,
-                           DBMS_LOB.SUBSTR(pv.long_string_value, 4000, 1),
-                           TO_CHAR(pv.number_value))
-        END) AS cig_product_code,
+-- Project
+LEFT JOIN RES_PROJECT proj ON s.PROJECT_ID = proj.ID
 
-    MAX(CASE WHEN p.display_label = 'Cig Product Description'
-             THEN COALESCE(pv.string_value,
-                           DBMS_LOB.SUBSTR(pv.long_string_value, 4000, 1))
-        END) AS cig_product_description,
-
-    MAX(CASE WHEN p.display_label = 'Spec group'
-             THEN COALESCE(pv.string_value,
-                           DBMS_LOB.SUBSTR(pv.long_string_value, 4000, 1))
-        END) AS spec_group
-
-  FROM hub_owner.cor_class_identity ci
-  JOIN hub_owner.cor_object_identity oi
-    ON oi.class_identity_id = ci.id
-  JOIN hub_owner.cor_property_value pv
-    ON pv.object_identity_id = oi.id
-  JOIN hub_owner.cor_property p
-    ON p.name = pv.property_id
-  WHERE ci.table_name = 'sam_sample'
-    AND p.display_label IN (
-      'Sampling Point',
-      'Sampling Point Description',
-      'Line',
-      'Product Code',
-      'Product Description',
-      'Cig Product Code',
-      'Cig Product Description',
-      'Spec group'
-    )
-  GROUP BY oi.object_id
-),
-
-task_param_results AS (
-  SELECT
-    -- sample id as stored in task.sample_list (comma-separated), item_index is 0-based
-    REGEXP_SUBSTR(rt.sample_list, '[^,]+', 1, pv.item_index + 1) AS matched_sample_id,
-
-    rt.id        AS req_task_row_id,
-    rt.task_id   AS task_id_text,
-    rt.task_name,
-    rt.method_id,
-
-    pv.item_index,
-    pv.value_numeric,
-    pv.value_text AS formatted_result,
-
-    p.name AS parameter_name
-
-  FROM hub_owner.cor_parameter_value pv
-  JOIN hub_owner.cor_parameter p
-    ON pv.parent_identity = p.id
-  JOIN hub_owner.req_task_parameter rtp
-    ON rtp.parameter_id = p.id
-  JOIN hub_owner.req_task rt
-    ON rt.id = rtp.task_id
-)
-
-SELECT
-  s.name      AS sample_name,
-  s.sample_id AS sample_id,
-
-  sp.sampling_point,
-  sp.sampling_point_description,
-  sp.line,
-
-  u.name AS owner,
-
-  sp.product_code,
-  sp.product_description,
-  sp.cig_product_code,
-  sp.cig_product_description,
-  sp.spec_group,
-
-  rp.name            AS task_plan_project,
-  t.life_cycle_state AS task_status,
-  t.task_id          AS task_id,
-  t.task_name        AS task_name,
-
-  -- appended results
-  r.parameter_name,
-  r.value_numeric,
-  r.formatted_result,
-  r.item_index,
-  r.method_id
-
-FROM hub_owner.sam_sample s
-JOIN hub_owner.req_runset_sample rss
-  ON rss.sample_id = s.id
-JOIN hub_owner.req_runset rs
-  ON rs.id = rss.runset_id
-JOIN hub_owner.req_task t
-  ON t.runset_id = rs.id
-
-LEFT JOIN hub_owner.res_project rp
-  ON rp.id = rs.project_id
-
-LEFT JOIN hub_owner.sec_user u
-  ON u.id = s.owner_id
-
-LEFT JOIN sample_props sp
-  ON sp.sample_raw_id = s.id
-
--- ✅ the real results join:
-LEFT JOIN task_param_results r
-  ON r.matched_sample_id = s.sample_id
- AND r.req_task_row_id   = t.id
-
-ORDER BY
-  s.name, s.sample_id, t.task_id, r.parameter_name, r.item_index;
+WHERE rt.TASK_NAME = 'QAP_PACK_OV'
+  AND p.NAME = 'Percent'
+  AND REGEXP_SUBSTR(rt.SAMPLE_LIST, '[^,]+', 1, pv.ITEM_INDEX + 1) IN ('S000200', 'S000199')
+  
+ORDER BY s.SAMPLE_ID, pv.ITEM_INDEX;
