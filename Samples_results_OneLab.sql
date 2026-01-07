@@ -197,8 +197,10 @@ SELECT
     loc.DESCRIPTION as "Location Description",
     
     -- Owner Information (Line-1 Owner)
-    u.FULL_NAME as "Line-1 Owner",
-    u.LOGIN_NAME as "Owner Login",
+    u.NAME as "Line-1 Owner",
+    u.USERNAME as "Owner Username",
+    u.FIRST_NAME as "Owner First Name",
+    u.LAST_NAME as "Owner Last Name",
     
     -- Project Information
     proj.NAME as "Project",
