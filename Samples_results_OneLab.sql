@@ -704,3 +704,144 @@ Compose Details          -> COR_PARAMETER_VALUE.INTERPRETATION
 Result                   -> COR_PARAMETER_VALUE.VALUE_STRING (full precision: 41.0229645...)
 Formatted result         -> COR_PARAMETER_VALUE.VALUE_TEXT (rounded: 41.02)
 */
+
+-- ========================================
+-- GENERALIZED REPORT QUERY
+-- With exact column names
+-- Remove sample filter to get all samples
+-- Change TASK_NAME to query different tests
+-- ========================================
+
+WITH sample_properties AS (
+  SELECT
+    oi.object_id AS sample_raw_id,
+    
+    MAX(CASE WHEN p.display_label = 'Sampling Point'
+             THEN COALESCE(pv.string_value,
+                           DBMS_LOB.SUBSTR(pv.long_string_value, 4000, 1),
+                           TO_CHAR(pv.number_value))
+        END) AS sampling_point,
+    
+    MAX(CASE WHEN p.display_label = 'Sampling Point Description'
+             THEN COALESCE(pv.string_value,
+                           DBMS_LOB.SUBSTR(pv.long_string_value, 4000, 1))
+        END) AS sampling_point_description,
+    
+    MAX(CASE WHEN p.display_label = 'Line'
+             THEN COALESCE(pv.string_value,
+                           DBMS_LOB.SUBSTR(pv.long_string_value, 4000, 1),
+                           TO_CHAR(pv.number_value))
+        END) AS line,
+    
+    MAX(CASE WHEN p.display_label = 'Product Code'
+             THEN COALESCE(pv.string_value,
+                           DBMS_LOB.SUBSTR(pv.long_string_value, 4000, 1),
+                           TO_CHAR(pv.number_value))
+        END) AS product_code,
+    
+    MAX(CASE WHEN p.display_label = 'Product Description'
+             THEN COALESCE(pv.string_value,
+                           DBMS_LOB.SUBSTR(pv.long_string_value, 4000, 1))
+        END) AS product_description,
+    
+    MAX(CASE WHEN p.display_label = 'Cig Product Code'
+             THEN COALESCE(pv.string_value,
+                           DBMS_LOB.SUBSTR(pv.long_string_value, 4000, 1),
+                           TO_CHAR(pv.number_value))
+        END) AS cig_product_code,
+    
+    MAX(CASE WHEN p.display_label = 'Cig Product Description'
+             THEN COALESCE(pv.string_value,
+                           DBMS_LOB.SUBSTR(pv.long_string_value, 4000, 1))
+        END) AS cig_product_description,
+    
+    MAX(CASE WHEN p.display_label = 'Spec group'
+             THEN COALESCE(pv.string_value,
+                           DBMS_LOB.SUBSTR(pv.long_string_value, 4000, 1))
+        END) AS spec_group
+        
+  FROM cor_class_identity ci
+  JOIN cor_object_identity oi ON oi.class_identity_id = ci.id
+  JOIN cor_property_value pv ON pv.object_identity_id = oi.id
+  JOIN cor_property p ON p.name = pv.property_id
+  WHERE ci.table_name = 'sam_sample'
+    AND p.display_label IN (
+      'Sampling Point',
+      'Sampling Point Description', 
+      'Line',
+      'Product Code',
+      'Product Description',
+      'Cig Product Code',
+      'Cig Product Description',
+      'Spec group'
+    )
+  GROUP BY oi.object_id
+)
+
+SELECT 
+    s.NAME as "Sample Name",
+    s.SAMPLE_ID as "Sample ID",
+    ms.SAMPLE_ID as "Master Sample ID",
+    sp.sampling_point as "Sampling point",
+    sp.sampling_point_description as "Sampling point description",
+    sp.line as "LINE-1",
+    u.NAME as "Owner",
+    sp.product_code as "Product Code",
+    sp.product_description as "Product Description",
+    sp.cig_product_code as "CIG_PRODUCT_CODE",
+    sp.cig_product_description as "CIG_PRODUCT_DESCRIPTION",
+    sp.spec_group as "Spec_Group",
+    proj.NAME as "Task Plan Project",
+    rt.LIFE_CYCLE_STATE as "Task Status",
+    p.NAME as "Characteristic",
+    pv.INTERPRETATION as "Compose Details",
+    pv.VALUE_STRING as "Result",
+    pv.VALUE_TEXT as "Formatted result"
+    
+FROM COR_PARAMETER_VALUE pv
+JOIN COR_PARAMETER p ON pv.PARENT_IDENTITY = p.ID
+JOIN REQ_TASK_PARAMETER rtp ON p.ID = rtp.PARAMETER_ID
+JOIN REQ_TASK rt ON rtp.TASK_ID = rt.ID
+LEFT JOIN REQ_RUNSET runset ON rt.RUNSET_ID = runset.ID
+LEFT JOIN REQ_ACTIVITY ra ON rt.ACTIVITY_ID = ra.ID
+LEFT JOIN SAM_SPEC_METHOD sm ON rt.SPECIFICATION_METHOD_ID = sm.ID
+LEFT JOIN SAM_SPEC_MTHD_CHAR smc ON sm.ID = smc.SPECIFICATION_METHOD_ID AND smc.PARAMETER_ID = p.ID
+LEFT JOIN SAM_SAMPLE s ON s.SAMPLE_ID = REGEXP_SUBSTR(rt.SAMPLE_LIST, '[^,]+', 1, pv.ITEM_INDEX + 1)
+LEFT JOIN SAM_SAMPLE ms ON s.MASTER_SAMPLE_ID = ms.ID
+LEFT JOIN SEC_USER u ON s.OWNER_ID = u.ID
+LEFT JOIN RES_PROJECT proj ON s.PROJECT_ID = proj.ID
+LEFT JOIN sample_properties sp ON sp.sample_raw_id = s.ID
+
+WHERE rt.TASK_NAME = 'QAP_PACK_OV'      -- Change this for different tests
+  --AND p.NAME = 'Percent'  AND               -- Change this for different parameters
+  pv.VALUE_KEY = 'A'                 -- Change/remove if needed for different tests
+  -- AND s.SAMPLE_ID IN ('S000200', 'S000199')  -- Uncomment to filter specific samples
+  
+ORDER BY s.SAMPLE_ID;
+
+
+-- ========================================
+-- CUSTOMIZATION GUIDE
+-- ========================================
+/*
+TO QUERY DIFFERENT TESTS:
+1. Change: WHERE rt.TASK_NAME = 'YOUR_TEST_NAME'
+2. May need to adjust: p.NAME = 'YourParameterName'
+3. Check if VALUE_KEY needs to change
+
+TO GET ALL SAMPLES:
+- Remove or comment out the sample filter line
+
+TO ADD MORE PROPERTIES:
+- Add CASE statement to sample_properties CTE
+- Use exact display_label from COR_PROPERTY table
+
+TO FILTER BY DATE RANGE:
+- Add: AND rt.DATE_CREATED BETWEEN date1 AND date2
+- Or: AND rt.COMPLETION_DATE >= date1
+
+TROUBLESHOOTING:
+- If duplicate rows: Check VALUE_KEY filter
+- If missing results: Remove VALUE_KEY filter temporarily
+- If wrong data: Verify TASK_NAME and parameter NAME
+*/
