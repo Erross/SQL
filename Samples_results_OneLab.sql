@@ -181,7 +181,6 @@ SELECT
     -- Sample Information
     REGEXP_SUBSTR(rt.SAMPLE_LIST, '[^,]+', 1, pv.ITEM_INDEX + 1) as "Sample ID",
     s.NAME as "Sample Name",
-    s.SAMPLE_ID as "Sample ID Verified",
     ms.SAMPLE_ID as "Master Sample ID",
     
     -- Sampling Point Information
@@ -212,14 +211,10 @@ SELECT
     -- Activity Information
     ra.NAME as "Activity Name",
     
-    -- Specification Method
-    sm.NAME as "Spec Method Name",
-    sm.METHOD_ID as "Spec Method ID",
-    
-    -- Characteristic/Spec Group Information
-    smc.COMPONENT as "Spec Group",
+    -- Characteristic Information
     p.NAME as "Characteristic",
     p.DESCRIPTION as "Characteristic Description",
+    smc.COMPONENT as "Spec Group",
     
     -- Result Information
     pv.VALUE_KEY as "Result Key",
@@ -246,7 +241,7 @@ LEFT JOIN REQ_ACTIVITY ra ON rt.ACTIVITY_ID = ra.ID
 LEFT JOIN SAM_SPEC_METHOD sm ON rt.SPECIFICATION_METHOD_ID = sm.ID
 LEFT JOIN SAM_SPEC_MTHD_CHAR smc ON sm.ID = smc.SPECIFICATION_METHOD_ID AND smc.PARAMETER_ID = p.ID
 
--- Now join to actual SAM_SAMPLE using the parsed sample ID
+-- Join to actual SAM_SAMPLE using the parsed sample ID
 LEFT JOIN SAM_SAMPLE s ON s.SAMPLE_ID = REGEXP_SUBSTR(rt.SAMPLE_LIST, '[^,]+', 1, pv.ITEM_INDEX + 1)
 
 -- Master Sample
@@ -266,4 +261,4 @@ WHERE rt.TASK_NAME = 'QAP_PACK_OV'
   AND p.NAME = 'Percent'
   AND REGEXP_SUBSTR(rt.SAMPLE_LIST, '[^,]+', 1, pv.ITEM_INDEX + 1) IN ('S000200', 'S000199')
   
-ORDER BY s.SAMPLE_ID, pv.ITEM_INDEX;
+ORDER BY "Sample ID", pv.ITEM_INDEX;
