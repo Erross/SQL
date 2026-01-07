@@ -177,6 +177,11 @@ WHERE rt.TASK_NAME = 'QAP_PACK_OV'
   )
 ORDER BY pv.ITEM_INDEX;
 
+-- ========================================
+-- FINAL COMPREHENSIVE REPORT QUERY
+-- Using ONLY verified columns from DDL
+-- ========================================
+
 SELECT 
     -- Sample Information
     REGEXP_SUBSTR(rt.SAMPLE_LIST, '[^,]+', 1, pv.ITEM_INDEX + 1) as "Sample ID",
@@ -189,41 +194,52 @@ SELECT
     
     -- Location
     loc.NAME as "Location",
+    loc.DESCRIPTION as "Location Description",
     
     -- Owner Information (Line-1 Owner)
     u.FULL_NAME as "Line-1 Owner",
+    u.LOGIN_NAME as "Owner Login",
     
     -- Project Information
     proj.NAME as "Project",
-    proj.PROJECT_CODE as "Project Code",
+    proj.DESCRIPTION as "Project Description",
     
     -- Task Plan Information
     runset.NAME as "Task Plan",
     runset.RUNSET_ID as "Task Plan ID",
+    runset.LIFE_CYCLE_STATE as "Task Plan State",
     
     -- Task Information
     rt.TASK_ID as "Task ID",
     rt.TASK_NAME as "Task Name",
     rt.METHOD_ID as "Method ID",
     rt.LIFE_CYCLE_STATE as "Task Status",
+    rt.DATE_CREATED as "Task Created",
     rt.COMPLETION_DATE as "Task Completion Date",
     
     -- Activity Information
     ra.NAME as "Activity Name",
+    ra.METHOD_ID as "Activity Method ID",
+    ra.DESCRIPTION as "Activity Description",
     
     -- Characteristic Information
     p.NAME as "Characteristic",
     p.DESCRIPTION as "Characteristic Description",
     smc.COMPONENT as "Spec Group",
+    smc.TARGET as "Target",
+    smc.LOWER_LIMIT as "Lower Limit",
+    smc.UPPER_LIMIT as "Upper Limit",
     
     -- Result Information
     pv.VALUE_KEY as "Result Key",
     pv.VALUE_NUMERIC as "Result",
     pv.VALUE_TEXT as "Formatted Result",
+    pv.VALUE_STRING as "Result String",
     pv.INTERPRETATION as "Compose Details",
     
     -- Additional Context
     pv.ITEM_INDEX as "Item Index",
+    pv.GROUP_INDEX as "Group Index",
     rt.SAMPLE_LIST as "Sample List"
     
 FROM COR_PARAMETER_VALUE pv
