@@ -382,3 +382,186 @@ WHERE rt.TASK_NAME = 'QAP_PACK_OV'
   AND REGEXP_SUBSTR(rt.SAMPLE_LIST, '[^,]+', 1, pv.ITEM_INDEX + 1) IN ('S000200', 'S000199')
   
 ORDER BY "Sample ID", pv.ITEM_INDEX;
+
+--NEW ATTEMPT
+
+-- ========================================
+-- FINAL COMPREHENSIVE REPORT QUERY
+-- Based on proven working query patterns
+-- One row per sample per test result
+-- ========================================
+
+WITH sample_properties AS (
+  -- Get all custom properties for samples
+  SELECT
+    oi.object_id AS sample_raw_id,
+    
+    MAX(CASE WHEN p.display_label = 'Sampling Point'
+             THEN COALESCE(pv.string_value,
+                           DBMS_LOB.SUBSTR(pv.long_string_value, 4000, 1),
+                           TO_CHAR(pv.number_value))
+        END) AS sampling_point,
+    
+    MAX(CASE WHEN p.display_label = 'Sampling Point Description'
+             THEN COALESCE(pv.string_value,
+                           DBMS_LOB.SUBSTR(pv.long_string_value, 4000, 1))
+        END) AS sampling_point_description,
+    
+    MAX(CASE WHEN p.display_label = 'Line'
+             THEN COALESCE(pv.string_value,
+                           DBMS_LOB.SUBSTR(pv.long_string_value, 4000, 1),
+                           TO_CHAR(pv.number_value))
+        END) AS line,
+    
+    MAX(CASE WHEN p.display_label = 'Product Code'
+             THEN COALESCE(pv.string_value,
+                           DBMS_LOB.SUBSTR(pv.long_string_value, 4000, 1),
+                           TO_CHAR(pv.number_value))
+        END) AS product_code,
+    
+    MAX(CASE WHEN p.display_label = 'Product Description'
+             THEN COALESCE(pv.string_value,
+                           DBMS_LOB.SUBSTR(pv.long_string_value, 4000, 1))
+        END) AS product_description,
+    
+    MAX(CASE WHEN p.display_label = 'Cig Product Code'
+             THEN COALESCE(pv.string_value,
+                           DBMS_LOB.SUBSTR(pv.long_string_value, 4000, 1),
+                           TO_CHAR(pv.number_value))
+        END) AS cig_product_code,
+    
+    MAX(CASE WHEN p.display_label = 'Cig Product Description'
+             THEN COALESCE(pv.string_value,
+                           DBMS_LOB.SUBSTR(pv.long_string_value, 4000, 1))
+        END) AS cig_product_description,
+    
+    MAX(CASE WHEN p.display_label = 'Spec group'
+             THEN COALESCE(pv.string_value,
+                           DBMS_LOB.SUBSTR(pv.long_string_value, 4000, 1))
+        END) AS spec_group
+        
+  FROM cor_class_identity ci
+  JOIN cor_object_identity oi ON oi.class_identity_id = ci.id
+  JOIN cor_property_value pv ON pv.object_identity_id = oi.id
+  JOIN cor_property p ON p.name = pv.property_id
+  WHERE ci.table_name = 'sam_sample'
+    AND p.display_label IN (
+      'Sampling Point',
+      'Sampling Point Description', 
+      'Line',
+      'Product Code',
+      'Product Description',
+      'Cig Product Code',
+      'Cig Product Description',
+      'Spec group'
+    )
+  GROUP BY oi.object_id
+)
+
+SELECT 
+    -- Sample Information
+    s.SAMPLE_ID as "Sample ID",
+    s.NAME as "Sample Name",
+    ms.SAMPLE_ID as "Master Sample ID",
+    
+    -- Sampling Point Information (from properties)
+    sp.sampling_point as "Sampling Point",
+    sp.sampling_point_description as "Sampling Point Description",
+    
+    -- Line
+    sp.line as "Line",
+    
+    -- Location Information (from location table)
+    loc.NAME as "Location",
+    loc.DESCRIPTION as "Location Description",
+    
+    -- Owner Information
+    u.NAME as "Line-1 Owner",
+    u.USERNAME as "Owner Username",
+    
+    -- Product Information (from properties)
+    sp.product_code as "Product Code",
+    sp.product_description as "Product Description",
+    sp.cig_product_code as "CIG Product Code",
+    sp.cig_product_description as "CIG Product Description",
+    
+    -- Spec Group (from properties)
+    sp.spec_group as "Spec Group",
+    
+    -- Project Information
+    proj.NAME as "Project",
+    proj.DESCRIPTION as "Project Description",
+    
+    -- Task Plan Information
+    runset.NAME as "Task Plan",
+    runset.RUNSET_ID as "Task Plan ID",
+    
+    -- Task Information
+    rt.TASK_ID as "Task ID",
+    rt.TASK_NAME as "Task Name",
+    rt.METHOD_ID as "Method ID",
+    rt.LIFE_CYCLE_STATE as "Task Status",
+    rt.DATE_CREATED as "Task Created",
+    rt.COMPLETION_DATE as "Task Completed",
+    
+    -- Activity Information
+    ra.NAME as "Activity Name",
+    ra.METHOD_ID as "Activity Method ID",
+    
+    -- Characteristic Information
+    p.NAME as "Characteristic",
+    p.DESCRIPTION as "Characteristic Description",
+    smc.COMPONENT as "Spec Group From Method",
+    smc.TARGET as "Target",
+    smc.LOWER_LIMIT as "Lower Limit",
+    smc.UPPER_LIMIT as "Upper Limit",
+    
+    -- Result Information
+    pv.VALUE_KEY as "Result Key",
+    pv.VALUE_NUMERIC as "Result",
+    pv.VALUE_TEXT as "Formatted Result",
+    pv.INTERPRETATION as "Compose Details",
+    
+    -- Additional Context
+    pv.ITEM_INDEX as "Item Index"
+    
+FROM COR_PARAMETER_VALUE pv
+JOIN COR_PARAMETER p ON pv.PARENT_IDENTITY = p.ID
+JOIN REQ_TASK_PARAMETER rtp ON p.ID = rtp.PARAMETER_ID
+JOIN REQ_TASK rt ON rtp.TASK_ID = rt.ID
+
+-- Runset/Task Plan
+LEFT JOIN REQ_RUNSET runset ON rt.RUNSET_ID = runset.ID
+
+-- Activity  
+LEFT JOIN REQ_ACTIVITY ra ON rt.ACTIVITY_ID = ra.ID
+
+-- Specification Method and Characteristics
+LEFT JOIN SAM_SPEC_METHOD sm ON rt.SPECIFICATION_METHOD_ID = sm.ID
+LEFT JOIN SAM_SPEC_MTHD_CHAR smc ON sm.ID = smc.SPECIFICATION_METHOD_ID AND smc.PARAMETER_ID = p.ID
+
+-- Join to SAM_SAMPLE using the ITEM_INDEX match to SAMPLE_LIST
+-- This is the key join we discovered!
+LEFT JOIN SAM_SAMPLE s ON s.SAMPLE_ID = REGEXP_SUBSTR(rt.SAMPLE_LIST, '[^,]+', 1, pv.ITEM_INDEX + 1)
+
+-- Master Sample
+LEFT JOIN SAM_SAMPLE ms ON s.MASTER_SAMPLE_ID = ms.ID
+
+-- Location
+LEFT JOIN RES_LOCATION loc ON s.LOCATION_ID = loc.ID
+
+-- Owner
+LEFT JOIN SEC_USER u ON s.OWNER_ID = u.ID
+
+-- Project
+LEFT JOIN RES_PROJECT proj ON s.PROJECT_ID = proj.ID
+
+-- Sample Properties
+LEFT JOIN sample_properties sp ON sp.sample_raw_id = s.ID
+
+WHERE rt.TASK_NAME = 'QAP_PACK_OV'
+  AND p.NAME = 'Percent'
+  AND pv.VALUE_KEY = 'A'
+  AND REGEXP_SUBSTR(rt.SAMPLE_LIST, '[^,]+', 1, pv.ITEM_INDEX + 1) IN ('S000200', 'S000199')
+  
+ORDER BY s.SAMPLE_ID, pv.ITEM_INDEX;
