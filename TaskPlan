@@ -1,0 +1,74 @@
+SELECT 
+    -- Runset information
+    rs.RUNSET_ID,
+    rs.NAME as RUNSET_NAME,
+    rs.CREATOR as RUNSET_CREATOR,
+    rs.LIFE_CYCLE as RUNSET_LIFECYCLE,
+    rs.LIFE_CYCLE_POLICY as RUNSET_LIFECYCLE_POLICY,
+    rs.COLLABORATOR_GROUP as RUNSET_COLLABORATIVE_SPACE,
+    rs.CONTEXT as RUNSET_CONTEXT,
+    
+    -- Task information
+    t.TASK_ID,
+    t.LIFE_CYCLE as TASK_LIFECYCLE,
+    t.LIFE_CYCLE_POLICY as TASK_LIFECYCLE_POLICY,
+    t.CREATOR as TASK_CREATOR,
+    t.ASSIGNED_TO as TASK_ASSIGNED_TO,
+    
+    -- Activity information for tasks
+    act.ACTIVITY_ID as ACTIVITY_ID,
+    act.NAME as ACTIVITY_NAME,
+    
+    -- Collaborative space/context for tasks
+    t.REQUESTED_GROUP as TASK_COLLABORATIVE_SPACE,
+    
+    -- Sample information
+    s.SAMPLE_ID,
+    s.NAME as SAMPLE_NAME,
+    s.DESCRIPTION as SAMPLE_DESCRIPTION,
+    s.LIFE_CYCLE as SAMPLE_LIFECYCLE,
+    s.LIFE_CYCLE_POLICY as SAMPLE_LIFECYCLE_POLICY,
+    s.CONTEXT as SAMPLE_CONTEXT,
+    
+    -- Sample owner information
+    u_sample.USERNAME as SAMPLE_OWNER_USERNAME,
+    u_sample.FIRST_NAME as SAMPLE_OWNER_FIRSTNAME,
+    u_sample.LAST_NAME as SAMPLE_OWNER_LASTNAME,
+    
+    -- Sample creator (if different from owner)
+    s.EXTERNAL_REFERENCE as SAMPLE_CREATOR,
+    
+    -- Additional sample details
+    s.LOCATION_ID,
+    s.DATE_COLLECTED,
+    s.EXTERNAL_ID as SAMPLE_EXTERNAL_ID
+
+FROM REQ_RUNSET rs
+
+-- Join to tasks
+LEFT JOIN REQ_TASK t 
+    ON rs.ID = t.RUNSET_ID 
+    AND t.DELETED IS NULL
+
+-- Join to activity for task details
+LEFT JOIN REQ_ACTIVITY act 
+    ON t.ACTIVITY_ID = act.ID
+
+-- Join to samples via the runset-sample linking table
+LEFT JOIN REQ_RUNSET_SAMPLE rss 
+    ON rs.ID = rss.RUNSET_ID
+
+LEFT JOIN SAM_SAMPLE s 
+    ON rss.SAMPLE_ID = s.ID 
+    AND s.DELETED IS NULL
+
+-- Join to get sample owner details
+LEFT JOIN SEC_USER u_sample 
+    ON s.OWNER_ID = u_sample.ID
+
+WHERE rs.DELETED IS NULL
+
+ORDER BY 
+    rs.RUNSET_ID,
+    t.TASK_ID,
+    s.SAMPLE_ID;
