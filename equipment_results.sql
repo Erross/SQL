@@ -52,3 +52,19 @@ JOIN COR_PARAMETER_VALUE pv ON pv.PARENT_IDENTITY = ms.ID
 JOIN COR_PARAMETER p ON p.ID = pv.PARAMETER_ID
 WHERE ms.SAMPLE_ID = 'S001'
 AND pv.VALUE_KEY = 'A';
+
+--couple steps skipped, next big q
+
+SELECT 
+    pv.ID,
+    pv.PARENT_IDENTITY,
+    pv.VALUE_NUMERIC,
+    pv.VALUE_STRING,
+    pv.ITEM_INDEX,
+    pv.VALUE_KEY,
+    pv.INTERPRETATION
+FROM COR_PARAMETER_VALUE pv
+JOIN COR_PARAMETER p ON p.ID = pv.PARENT_IDENTITY
+WHERE p.ID = '<paste that long ID string here>'
+AND pv.VALUE_NUMERIC = 19.2
+AND ROWNUM <= 5;
