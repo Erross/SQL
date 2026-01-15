@@ -68,3 +68,14 @@ JOIN COR_PARAMETER p ON p.ID = pv.PARENT_IDENTITY
 WHERE p.ID = '<paste that long ID string here>'
 AND pv.VALUE_NUMERIC = 19.2
 AND ROWNUM <= 5;
+
+--try pex values? (process execution)
+
+SELECT 
+    ctx.CONTEXT as pex_urn,
+    pex.ID,
+    pex.STATE
+FROM RES_RETRIEVAL_CONTEXT ctx
+JOIN RES_MEASUREMENTSAMPLE ms ON ctx.ID = ms.CONTEXT_ID
+JOIN PEX_PROC_ELEM_EXEC pex ON ctx.CONTEXT = 'urn:compose:pex_proc_elem_exec:' || RAWTOHEX(pex.ID)
+WHERE ms.SAMPLE_ID = 'S001';
