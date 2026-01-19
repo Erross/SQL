@@ -117,3 +117,21 @@ CROSS JOIN (
 ) ctx
 WHERE pv.VALUE_NUMERIC = 19.2
 AND ROWNUM = 1;
+
+--handle pex properly
+SELECT *
+FROM COR_PARAMETER_VALUE pv
+JOIN PEX_PROC_ELEM_EXEC_PARAM peep ON peep.ID = pv.PARENT_IDENTITY
+JOIN PEX_PROC_ELEM_EXEC pee ON pee.ID = peep.PARENT_ID
+JOIN PEX_PROC_EXEC pe ON pe.ID = pee.PARENT_ID
+JOIN RES_RETRIEVAL_CONTEXT ctx ON ctx.CONTEXT = 
+    'urn:pexelement:' || 
+    LOWER(
+        SUBSTR(RAWTOHEX(pee.ID), 1, 8) || '-' ||
+        SUBSTR(RAWTOHEX(pee.ID), 9, 4) || '-' ||
+        SUBSTR(RAWTOHEX(pee.ID), 13, 4) || '-' ||
+        SUBSTR(RAWTOHEX(pee.ID), 17, 4) || '-' ||
+        SUBSTR(RAWTOHEX(pee.ID), 21, 12)
+    )
+WHERE pv.VALUE_NUMERIC = 19.2
+AND ROWNUM = 1;
