@@ -100,3 +100,20 @@ JOIN RES_RETRIEVAL_CONTEXT ctx ON ctx.CONTEXT = 'urn:compose:pex_proc_elem_exec:
 JOIN RES_MEASUREMENTSAMPLE ms ON ms.CONTEXT_ID = ctx.ID
 WHERE pv.VALUE_NUMERIC = 19.2
 AND ROWNUM = 1;
+
+SELECT 
+    'urn:pexelement:' || RAWTOHEX(pee.ID) as constructed_urn,
+    ctx.CONTEXT as actual_urn,
+    CASE WHEN 'urn:pexelement:' || RAWTOHEX(pee.ID) = ctx.CONTEXT THEN 'MATCH' ELSE 'NO MATCH' END as match_status
+FROM COR_PARAMETER_VALUE pv
+JOIN PEX_PROC_ELEM_EXEC_PARAM peep ON peep.ID = pv.PARENT_IDENTITY
+JOIN PEX_PROC_ELEM_EXEC pee ON pee.ID = peep.PARENT_ID
+JOIN PEX_PROC_EXEC pe ON pe.ID = pee.PARENT_ID
+CROSS JOIN (
+    SELECT ctx.* 
+    FROM RES_RETRIEVAL_CONTEXT ctx
+    JOIN RES_MEASUREMENTSAMPLE ms ON ms.CONTEXT_ID = ctx.ID
+    WHERE ms.SAMPLE_ID = 'S001'
+) ctx
+WHERE pv.VALUE_NUMERIC = 19.2
+AND ROWNUM = 1;
