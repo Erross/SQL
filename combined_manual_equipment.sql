@@ -1,7 +1,3 @@
--- ========================================
--- COMBINED MANUAL + EQUIPMENT TEST RESULTS
--- ========================================
-
 WITH sample_properties AS (
   SELECT
     oi.object_id AS sample_raw_id,
@@ -21,7 +17,7 @@ WITH sample_properties AS (
              THEN COALESCE(pv.string_value, DBMS_LOB.SUBSTR(pv.long_string_value, 4000, 1))
         END) AS product_description,
     MAX(CASE WHEN p.display_label = 'Cig Product Code'
-             THEN COALESCE(pv.string_value, DBMS_LOB.SUBSTR(pv.long_string_value, 4000, 1))
+             THEN COALESCE(pv.string_value, DBMS_LOB.SUBSTR(pv.long_string_value, 4000, 1), TO_CHAR(pv.number_value))
         END) AS cig_product_code,
     MAX(CASE WHEN p.display_label = 'Cig Product Description'
              THEN COALESCE(pv.string_value, DBMS_LOB.SUBSTR(pv.long_string_value, 4000, 1))
@@ -39,7 +35,7 @@ WITH sample_properties AS (
 )
 
 -- MANUAL TEST RESULTS
-SELECT 
+SELECT
     s.NAME as "Sample Name",
     s.SAMPLE_ID as "Sample ID",
     ms.SAMPLE_ID as "Master Sample ID",
@@ -53,11 +49,13 @@ SELECT
     sp.cig_product_description as "CIG_PRODUCT_DESCRIPTION",
     sp.spec_group as "Spec_Group",
     proj.NAME as "Task Plan Project",
+    runset.RUNSET_ID as "Task Plan ID",
     rt.LIFE_CYCLE_STATE as "Task Status",
-    p.NAME as "Characteristic",
+    p.DISPLAY_NAME as "Characteristic",
     pv.INTERPRETATION as "Compose Details",
     pv.VALUE_STRING as "Result",
     pv.VALUE_TEXT as "Formatted result",
+    cs.NAME as "Collaboration Space",
     'MANUAL' as "Result Source"
 FROM COR_PARAMETER_VALUE pv
 JOIN COR_PARAMETER p ON pv.PARENT_IDENTITY = p.ID
@@ -72,13 +70,19 @@ LEFT JOIN SAM_SAMPLE ms ON s.MASTER_SAMPLE_ID = ms.ID
 LEFT JOIN SEC_USER u ON s.OWNER_ID = u.ID
 LEFT JOIN RES_PROJECT proj ON s.PROJECT_ID = proj.ID
 LEFT JOIN sample_properties sp ON sp.sample_raw_id = s.ID
+LEFT JOIN COSPC_OBJECT_IDENTITY coi_sample ON coi_sample.OBJECT_ID = s.ID
+LEFT JOIN SEC_COLLAB_SPACE cs ON cs.ID = coi_sample.COLLABORATIVE_SPACE_ID
 WHERE pv.VALUE_KEY = 'A'
-  AND runset.RUNSET_ID = 'TP002'
+  AND s.SAMPLE_ID IS NOT NULL
+  AND rt.LIFE_CYCLE_STATE IN ('released', 'completed')
+  AND p.VALUE_TYPE NOT IN ('Vocabulary')
+  AND pv.VALUE_STRING IS NOT NULL
+  AND cs.ID = '7346DF089B054D44967B6BEEE828FA22'
 
 UNION ALL
 
 -- EQUIPMENT MEASUREMENT RESULTS
-SELECT 
+SELECT
     s.NAME as "Sample Name",
     s.SAMPLE_ID as "Sample ID",
     ms.SAMPLE_ID as "Master Sample ID",
@@ -92,11 +96,13 @@ SELECT
     sp.cig_product_description as "CIG_PRODUCT_DESCRIPTION",
     sp.spec_group as "Spec_Group",
     proj.NAME as "Task Plan Project",
+    runset.RUNSET_ID as "Task Plan ID",
     rt.LIFE_CYCLE_STATE as "Task Status",
     MAX(CASE WHEN pv.VALUE_STRING IS NOT NULL THEN pv.VALUE_STRING END) as "Characteristic",
     NULL as "Compose Details",
     TO_CHAR(MAX(CASE WHEN pv.VALUE_NUMERIC IS NOT NULL THEN pv.VALUE_NUMERIC END)) as "Result",
     TO_CHAR(MAX(CASE WHEN pv.VALUE_NUMERIC IS NOT NULL THEN pv.VALUE_NUMERIC END)) as "Formatted result",
+    cs.NAME as "Collaboration Space",
     'EQUIPMENT' as "Result Source"
 FROM COR_PARAMETER_VALUE pv
 JOIN PEX_PROC_ELEM_EXEC_PARAM peep ON peep.ID = pv.PARENT_IDENTITY
@@ -107,14 +113,18 @@ JOIN RES_RETRIEVAL_CONTEXT ctx ON ctx.CONTEXT =
 JOIN RES_MEASUREMENTSAMPLE meas_s ON meas_s.CONTEXT_ID = ctx.ID
 JOIN RES_MEASUREMENT m ON m.ID = meas_s.MEASUREMENT_ID
 JOIN SAM_SAMPLE s ON s.ID = meas_s.MAPPED_SAMPLE_ID
-JOIN REQ_TASK rt ON INSTR(',' || rt.SAMPLE_LIST || ',', ',' || s.SAMPLE_ID || ',') > 0
-JOIN REQ_RUNSET runset ON runset.ID = rt.RUNSET_ID
 LEFT JOIN SAM_SAMPLE ms ON s.MASTER_SAMPLE_ID = ms.ID
 LEFT JOIN SEC_USER u ON s.OWNER_ID = u.ID
 LEFT JOIN RES_PROJECT proj ON s.PROJECT_ID = proj.ID
 LEFT JOIN sample_properties sp ON sp.sample_raw_id = s.ID
-WHERE runset.RUNSET_ID = 'TP002'
-GROUP BY s.NAME, s.SAMPLE_ID, ms.SAMPLE_ID, sp.sampling_point, sp.sampling_point_description, sp.line, u.NAME, sp.product_code, sp.product_description, sp.cig_product_code, sp.cig_product_description, sp.spec_group, proj.NAME, rt.LIFE_CYCLE_STATE, peep.ID
+JOIN REQ_TASK rt ON INSTR(',' || rt.SAMPLE_LIST || ',', ',' || s.SAMPLE_ID || ',') > 0
+LEFT JOIN REQ_RUNSET runset ON rt.RUNSET_ID = runset.ID
+LEFT JOIN COSPC_OBJECT_IDENTITY coi_sample ON coi_sample.OBJECT_ID = s.ID
+LEFT JOIN SEC_COLLAB_SPACE cs ON cs.ID = coi_sample.COLLABORATIVE_SPACE_ID
+WHERE s.SAMPLE_ID IS NOT NULL
+  AND rt.LIFE_CYCLE_STATE IN ('released', 'completed')
+  AND cs.ID = '7346DF089B054D44967B6BEEE828FA22'
+GROUP BY s.NAME, s.SAMPLE_ID, ms.SAMPLE_ID, sp.sampling_point, sp.sampling_point_description, sp.line, u.NAME, sp.product_code, sp.product_description, sp.cig_product_code, sp.cig_product_description, sp.spec_group, proj.NAME, runset.RUNSET_ID, rt.LIFE_CYCLE_STATE, cs.NAME, peep.ID
 HAVING MAX(CASE WHEN pv.VALUE_NUMERIC IS NOT NULL THEN pv.VALUE_NUMERIC END) IS NOT NULL
 
 ORDER BY "Sample ID", "Characteristic";
