@@ -352,3 +352,20 @@ JOIN SAM_SAMPLE s ON s.ID = ms.MAPPED_SAMPLE_ID
 JOIN REQ_TASK t ON INSTR(',' || t.SAMPLE_LIST || ',', ',' || s.SAMPLE_ID || ',') > 0
 JOIN REQ_RUNSET r ON r.ID = t.RUNSET_ID
 WHERE pv.VALUE_NUMERIC = 19.2;
+
+--how to connect - prior gave a lot of bs
+
+SELECT 
+    pv.ID,
+    pv.PARENT_IDENTITY,
+    pv.VALUE_NUMERIC,
+    pv.VALUE_STRING,
+    pv.VALUE_URN,
+    pv.VALUE_TYPE,
+    pv.ITEM_INDEX,
+    pv.GROUP_INDEX,
+    pv.VALUE_KEY,
+    pv.CONTEXT_ATTRIBUTE
+FROM COR_PARAMETER_VALUE pv
+WHERE pv.VALUE_NUMERIC = 19.2
+AND ROWNUM = 1;
