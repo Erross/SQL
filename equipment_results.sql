@@ -470,3 +470,39 @@ JOIN RES_RETRIEVAL_CONTEXT ctx ON ctx.CONTEXT =
 JOIN RES_MEASUREMENTSAMPLE ms ON ms.CONTEXT_ID = ctx.ID
 WHERE ms.SAMPLE_ID = 'S001'
 ORDER BY param.DISPLAY_NAME;
+
+--aargh, I think
+SELECT 
+    r.RUNSET_ID,
+    s.SAMPLE_ID,
+    param_exec.DISPLAY_NAME as CHARACTERISTIC_NAME,
+    pv.VALUE_NUMERIC,
+    pv.VALUE_STRING,
+    peep.SOURCE_POSITION
+FROM COR_PARAMETER_VALUE pv
+JOIN PEX_PROC_ELEM_EXEC_PARAM peep ON peep.ID = pv.PARENT_IDENTITY
+JOIN PEX_PROC_ELEM_EXEC pee ON pee.ID = peep.PARENT_ID
+JOIN PEX_PROC_EXEC pe ON pe.ID = pee.PARENT_ID
+JOIN PEX_PROC_EXEC_PARAM pep ON pep.PARENT_ID = pe.ID
+JOIN COR_PARAMETER param_exec ON param_exec.ID = pep.PARAMETER_ID
+JOIN COR_PARAMETER param_template ON (
+    param_template.ROOT_ID = param_exec.ROOT_ID 
+    OR param_template.ID = param_exec.ROOT_ID
+    OR param_template.ID = param_exec.CLONED_FROM
+)
+JOIN RES_RETRIEVAL_CONTEXT ctx ON ctx.CONTEXT = 
+    'urn:pexelement:' || 
+    LOWER(
+        SUBSTR(RAWTOHEX(pee.ID), 1, 8) || '-' ||
+        SUBSTR(RAWTOHEX(pee.ID), 9, 4) || '-' ||
+        SUBSTR(RAWTOHEX(pee.ID), 13, 4) || '-' ||
+        SUBSTR(RAWTOHEX(pee.ID), 17, 4) || '-' ||
+        SUBSTR(RAWTOHEX(pee.ID), 21, 12)
+    )
+JOIN RES_MEASUREMENTSAMPLE ms ON ms.CONTEXT_ID = ctx.ID
+JOIN RES_MEASUREMENT m ON m.ID = ms.MEASUREMENT_ID
+JOIN SAM_SAMPLE s ON s.ID = ms.MAPPED_SAMPLE_ID
+JOIN REQ_TASK t ON INSTR(',' || t.SAMPLE_LIST || ',', ',' || s.SAMPLE_ID || ',') > 0
+JOIN REQ_RUNSET r ON r.ID = t.RUNSET_ID
+WHERE param_template.DISPLAY_NAME = 'OV Meter Reading [%]'
+AND pv.VALUE_NUMERIC = 19.2;
