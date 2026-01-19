@@ -506,3 +506,21 @@ JOIN REQ_TASK t ON INSTR(',' || t.SAMPLE_LIST || ',', ',' || s.SAMPLE_ID || ',')
 JOIN REQ_RUNSET r ON r.ID = t.RUNSET_ID
 WHERE param_template.DISPLAY_NAME = 'OV Meter Reading [%]'
 AND pv.VALUE_NUMERIC = 19.2;
+
+--where is my proper display name thoi?
+
+SELECT 
+    pv.ID,
+    pv.PARENT_IDENTITY,
+    pv.VALUE_NUMERIC,
+    pv.VALUE_STRING,
+    pv.VALUE_TEXT,
+    pv.VALUE_URN,
+    pv.VALUE_TYPE,
+    pv.CONTEXT_ATTRIBUTE,
+    pv.INTERPRETATION,
+    pv.ITEM_INDEX,
+    pv.GROUP_INDEX
+FROM COR_PARAMETER_VALUE pv
+WHERE pv.VALUE_NUMERIC = 19.2
+AND ROWNUM = 1;
