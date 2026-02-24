@@ -151,6 +151,9 @@ UNION ALL
 
 -- =========================
 -- EQUIPMENT MEASUREMENT RESULTS
+-- Join order: pe -> pee -> ctx -> meas_s -> s first,
+-- then peep -> pv with ITEM_INDEX = meas_s.ROW_INDEX
+-- so ROW_INDEX is in scope when pv is joined
 -- =========================
 SELECT
     s.NAME,
@@ -181,15 +184,7 @@ SELECT
     'EQUIPMENT',
     MAX(uom.description),
     rp.tp_project_plan
-FROM hub_owner.COR_PARAMETER_VALUE pv
-JOIN hub_owner.PEX_PROC_ELEM_EXEC_PARAM peep
-     ON peep.ID = pv.PARENT_IDENTITY
-     -- KEY FIX: pin pv row to the correct sample position in the batch
-     AND pv.ITEM_INDEX = meas_s.ROW_INDEX
-JOIN hub_owner.PEX_PROC_ELEM_EXEC pee
-     ON pee.ID = peep.PARENT_ID
-JOIN hub_owner.PEX_PROC_EXEC pe
-     ON pe.ID = pee.PARENT_ID
+FROM hub_owner.PEX_PROC_EXEC pe
 -- Direct 1:1 join from process execution to task via WORK_ITEM URN
 JOIN hub_owner.REQ_TASK rt
      ON rt.WORK_ITEM LIKE '%' || LOWER(
@@ -199,6 +194,8 @@ JOIN hub_owner.REQ_TASK rt
             SUBSTR(RAWTOHEX(pe.ID),17,4) ||'-'||
             SUBSTR(RAWTOHEX(pe.ID),21,12)
         ) || '%'
+JOIN hub_owner.PEX_PROC_ELEM_EXEC pee
+     ON pee.PARENT_ID = pe.ID
 JOIN hub_owner.RES_RETRIEVAL_CONTEXT ctx
      ON ctx.CONTEXT =
         'urn:pexelement:' ||
@@ -215,6 +212,12 @@ JOIN hub_owner.RES_MEASUREMENT m
      ON m.ID = meas_s.MEASUREMENT_ID
 JOIN hub_owner.SAM_SAMPLE s
      ON s.SAMPLE_ID = meas_s.SAMPLE_ID
+-- peep and pv joined after meas_s so ROW_INDEX is in scope
+JOIN hub_owner.PEX_PROC_ELEM_EXEC_PARAM peep
+     ON peep.PARENT_ID = pee.ID
+JOIN hub_owner.COR_PARAMETER_VALUE pv
+     ON pv.PARENT_IDENTITY = peep.ID
+     AND pv.ITEM_INDEX = meas_s.ROW_INDEX
 LEFT JOIN hub_owner.SAM_SAMPLE ms
      ON s.MASTER_SAMPLE_ID = ms.ID
 LEFT JOIN hub_owner.SEC_USER usr
