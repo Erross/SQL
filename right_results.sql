@@ -189,6 +189,15 @@ JOIN hub_owner.PEX_PROC_ELEM_EXEC pee
      ON pee.ID = peep.PARENT_ID
 JOIN hub_owner.PEX_PROC_EXEC pe
      ON pe.ID = pee.PARENT_ID
+-- Direct 1:1 join from process execution to task via WORK_ITEM URN - eliminates fan-out
+JOIN hub_owner.REQ_TASK rt
+     ON rt.WORK_ITEM LIKE '%' || LOWER(
+            SUBSTR(RAWTOHEX(pe.ID),1,8)||'-'||
+            SUBSTR(RAWTOHEX(pe.ID),9,4)||'-'||
+            SUBSTR(RAWTOHEX(pe.ID),13,4)||'-'||
+            SUBSTR(RAWTOHEX(pe.ID),17,4)||'-'||
+            SUBSTR(RAWTOHEX(pe.ID),21,12)
+        ) || '%'
 JOIN hub_owner.RES_RETRIEVAL_CONTEXT ctx
      ON ctx.CONTEXT =
         'urn:pexelement:' ||
@@ -203,13 +212,8 @@ JOIN hub_owner.RES_MEASUREMENTSAMPLE meas_s
      ON meas_s.CONTEXT_ID = ctx.ID
 JOIN hub_owner.RES_MEASUREMENT m
      ON m.ID = meas_s.MEASUREMENT_ID
--- Use ROW_INDEX to resolve individual sample from task SAMPLE_LIST
--- mirrors the ITEM_INDEX approach in the manual section
-JOIN hub_owner.REQ_TASK rt
-     ON INSTR(','||rt.SAMPLE_LIST||',',
-              ','||meas_s.SAMPLE_ID||',') > 0
 JOIN hub_owner.SAM_SAMPLE s
-     ON s.SAMPLE_ID = REGEXP_SUBSTR(rt.SAMPLE_LIST, '[^,]+', 1, meas_s.ROW_INDEX + 1)
+     ON s.SAMPLE_ID = meas_s.SAMPLE_ID
 LEFT JOIN hub_owner.SAM_SAMPLE ms
      ON s.MASTER_SAMPLE_ID = ms.ID
 LEFT JOIN hub_owner.SEC_USER usr
@@ -243,70 +247,3 @@ GROUP BY
     rt.LIFE_CYCLE_STATE, cs.NAME, peep.ID
 HAVING MAX(CASE WHEN pv.VALUE_NUMERIC IS NOT NULL
                 THEN pv.VALUE_NUMERIC END) IS NOT NULL;
-
-                SELECT 
-    meas_s.SAMPLE_ID     AS meas_sample_id,
-    meas_s.ROW_INDEX,
-    RAWTOHEX(meas_s.MAPPED_SAMPLE_ID) AS mapped_id_hex,
-    s_mapped.SAMPLE_ID   AS mapped_sample_id,
-    rt.SAMPLE_LIST
-FROM hub_owner.RES_MEASUREMENTSAMPLE meas_s
-JOIN hub_owner.SAM_SAMPLE s_mapped 
-     ON s_mapped.ID = meas_s.MAPPED_SAMPLE_ID
-JOIN hub_owner.REQ_TASK rt
-     ON INSTR(','||rt.SAMPLE_LIST||',', ','||s_mapped.SAMPLE_ID||',') > 0
-WHERE s_mapped.SAMPLE_ID IN ('S000878','S000881','S000884')
-FETCH FIRST 10 ROWS ONLY;
-
---next diagnostic
-
-SELECT 
-    meas_s.SAMPLE_ID,
-    rt.TASK_ID,
-    rt.RUNSET_ID,
-    pv.VALUE_NUMERIC,
-    pv.VALUE_STRING
-FROM hub_owner.COR_PARAMETER_VALUE pv
-JOIN hub_owner.PEX_PROC_ELEM_EXEC_PARAM peep
-     ON peep.ID = pv.PARENT_IDENTITY
-JOIN hub_owner.PEX_PROC_ELEM_EXEC pee
-     ON pee.ID = peep.PARENT_ID
-JOIN hub_owner.PEX_PROC_EXEC pe
-     ON pe.ID = pee.PARENT_ID
-JOIN hub_owner.RES_RETRIEVAL_CONTEXT ctx
-     ON ctx.CONTEXT =
-        'urn:pexelement:' ||
-        LOWER(
-            SUBSTR(RAWTOHEX(pee.ID),1,8)||'-'||
-            SUBSTR(RAWTOHEX(pee.ID),9,4)||'-'||
-            SUBSTR(RAWTOHEX(pee.ID),13,4)||'-'||
-            SUBSTR(RAWTOHEX(pee.ID),17,4)||'-'||
-            SUBSTR(RAWTOHEX(pee.ID),21,12)
-        )
-JOIN hub_owner.RES_MEASUREMENTSAMPLE meas_s
-     ON meas_s.CONTEXT_ID = ctx.ID
-JOIN hub_owner.REQ_TASK rt
-     ON INSTR(','||rt.SAMPLE_LIST||',', ','||meas_s.SAMPLE_ID||',') > 0
-WHERE meas_s.SAMPLE_ID = 'S000878'
-ORDER BY rt.TASK_ID;
-
---smol diagnositc
-
-SELECT * FROM hub_owner.pex_proc_exec 
-FETCH FIRST 5 ROWS ONLY;
-
-SELECT 
-    rt.TASK_ID,
-    rt.WORK_ITEM,
-    RAWTOHEX(pe.ID) as pe_id_hex
-FROM hub_owner.REQ_TASK rt
-JOIN hub_owner.PEX_PROC_EXEC pe 
-     ON rt.WORK_ITEM LIKE '%' || LOWER(
-            SUBSTR(RAWTOHEX(pe.ID),1,8)||'-'||
-            SUBSTR(RAWTOHEX(pe.ID),9,4)||'-'||
-            SUBSTR(RAWTOHEX(pe.ID),13,4)||'-'||
-            SUBSTR(RAWTOHEX(pe.ID),17,4)||'-'||
-            SUBSTR(RAWTOHEX(pe.ID),21,12)
-        ) || '%'
-WHERE rt.SAMPLE_LIST LIKE '%S000878%'
-FETCH FIRST 10 ROWS ONLY;
