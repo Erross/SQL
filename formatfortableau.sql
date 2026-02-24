@@ -264,6 +264,7 @@ LEFT JOIN hub_owner.REQ_RUNSET runset ON rt.RUNSET_ID = runset.ID
 WHERE INSTR(','||rt.SAMPLE_LIST||',', ',S001053,') > 0
 ORDER BY rt.LAST_UPDATED DESC;
 
+
 SELECT 
     runset.RUNSET_ID,
     runset.LIFE_CYCLE_STATE,
