@@ -249,12 +249,11 @@ HAVING MAX(CASE WHEN pv.VALUE_NUMERIC IS NOT NULL
                 THEN pv.VALUE_NUMERIC END) IS NOT NULL;
 
                 --diagnostic 1
-                SELECT 
-    peep.ID as peep_id,
-    pv.SOURCE_POSITION,
+    SELECT 
+    peep.ID          AS peep_id,
+    peep.SOURCE_POSITION,
     pv.VALUE_NUMERIC,
     pv.VALUE_STRING,
-    pv.VALUE_TEXT,
     meas_s.SAMPLE_ID,
     meas_s.ROW_INDEX
 FROM hub_owner.COR_PARAMETER_VALUE pv
@@ -275,4 +274,4 @@ JOIN hub_owner.RES_RETRIEVAL_CONTEXT ctx
 JOIN hub_owner.RES_MEASUREMENTSAMPLE meas_s
      ON meas_s.CONTEXT_ID = ctx.ID
 WHERE meas_s.SAMPLE_ID = 'S000878'
-ORDER BY peep.ID, pv.SOURCE_POSITION, meas_s.ROW_INDEX;
+ORDER BY peep.ID, peep.SOURCE_POSITION, meas_s.ROW_INDEX;
