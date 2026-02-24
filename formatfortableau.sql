@@ -310,3 +310,16 @@ JOIN hub_owner.cor_class_identity ci ON ci.id = oi.class_identity_id
 JOIN hub_owner.SAM_SAMPLE s ON s.ID = oi.object_id
 WHERE ci.table_name = 'sam_sample'
   AND s.SAMPLE_ID = 'S001053';
+
+  SELECT DISTINCT
+    pv.VALUE_KEY,
+    pv.VALUE_STRING,
+    pv.VALUE_NUMERIC,
+    pv.ITEM_INDEX,
+    p.DISPLAY_NAME
+FROM hub_owner.COR_PARAMETER_VALUE pv
+JOIN hub_owner.COR_PARAMETER p ON pv.PARENT_IDENTITY = p.ID
+JOIN hub_owner.REQ_TASK_PARAMETER rtp ON p.ID = rtp.PARAMETER_ID
+JOIN hub_owner.REQ_TASK rt ON rtp.TASK_ID = rt.ID
+WHERE INSTR(','||rt.SAMPLE_LIST||',', ',S001053,') > 0
+ORDER BY pv.ITEM_INDEX, pv.VALUE_KEY;
