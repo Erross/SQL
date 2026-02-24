@@ -265,18 +265,30 @@ SELECT
     rt.TASK_ID,
     rt.RUNSET_ID,
     pv.VALUE_NUMERIC,
-    pv.VALUE_STRING,
-    peep.ID as peep_id
-FROM hub_owner.RES_MEASUREMENTSAMPLE meas_s
+    pv.VALUE_STRING
+FROM hub_owner.COR_PARAMETER_VALUE pv
+JOIN hub_owner.PEX_PROC_ELEM_EXEC_PARAM peep
+     ON peep.ID = pv.PARENT_IDENTITY
+JOIN hub_owner.PEX_PROC_ELEM_EXEC pee
+     ON pee.ID = peep.PARENT_ID
+JOIN hub_owner.PEX_PROC_EXEC pe
+     ON pe.ID = pee.PARENT_ID
+JOIN hub_owner.RES_RETRIEVAL_CONTEXT ctx
+     ON ctx.CONTEXT =
+        'urn:pexelement:' ||
+        LOWER(
+            SUBSTR(RAWTOHEX(pee.ID),1,8)||'-'||
+            SUBSTR(RAWTOHEX(pee.ID),9,4)||'-'||
+            SUBSTR(RAWTOHEX(pee.ID),13,4)||'-'||
+            SUBSTR(RAWTOHEX(pee.ID),17,4)||'-'||
+            SUBSTR(RAWTOHEX(pee.ID),21,12)
+        )
+JOIN hub_owner.RES_MEASUREMENTSAMPLE meas_s
+     ON meas_s.CONTEXT_ID = ctx.ID
 JOIN hub_owner.REQ_TASK rt
      ON INSTR(','||rt.SAMPLE_LIST||',', ','||meas_s.SAMPLE_ID||',') > 0
-JOIN hub_owner.COR_PARAMETER_VALUE pv
-     ON pv.PARENT_IDENTITY = (
-         SELECT peep2.ID 
-         FROM hub_owner.PEX_PROC_ELEM_EXEC_PARAM peep2 
-         WHERE peep2.ID = pv.PARENT_IDENTITY
-     )
 WHERE meas_s.SAMPLE_ID = 'S000878'
+ORDER BY rt.TASK_ID;
 
 --smol diagnositc
 
