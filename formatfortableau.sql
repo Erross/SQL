@@ -295,3 +295,18 @@ FROM hub_owner.AUD_SAM_SAMPLE a
 JOIN hub_owner.SAM_SAMPLE s ON s.ID = a.SAMPLE_ID
 WHERE s.SAMPLE_ID = 'S001053'
 ORDER BY a.LAST_UPDATED DESC;
+
+--extended?
+
+SELECT 
+    p.display_label,
+    p.name,
+    pv.string_value,
+    pv.number_value
+FROM hub_owner.cor_object_identity oi
+JOIN hub_owner.cor_property_value pv ON pv.object_identity_id = oi.id
+JOIN hub_owner.cor_property p ON p.name = pv.property_id
+JOIN hub_owner.cor_class_identity ci ON ci.id = oi.class_identity_id
+JOIN hub_owner.SAM_SAMPLE s ON s.ID = oi.object_id
+WHERE ci.table_name = 'sam_sample'
+  AND s.SAMPLE_ID = 'S001053';
