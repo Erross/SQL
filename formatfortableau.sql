@@ -336,3 +336,20 @@ JOIN hub_owner.PEX_PROC_EXEC pe
             SUBSTR(RAWTOHEX(pe.ID),21,12)) || '%'
 JOIN hub_owner.PEX_PROC_ELEM_EXEC pee ON pee.PARENT_ID = pe.ID
 WHERE INSTR(','||rt.SAMPLE_LIST||',', ',S001053,') > 0;
+SELECT 
+    pee.SOURCE_POSITION,
+    pee.ITEM_STATES,
+    LENGTH(pee.ITEM_STATES) as states_length,
+    rt.SAMPLE_LIST,
+    -- how many samples in the list
+    LENGTH(rt.SAMPLE_LIST) - LENGTH(REPLACE(rt.SAMPLE_LIST,',','')) + 1 as sample_count
+FROM hub_owner.REQ_TASK rt
+JOIN hub_owner.PEX_PROC_EXEC pe
+     ON rt.WORK_ITEM LIKE '%' || LOWER(
+            SUBSTR(RAWTOHEX(pe.ID),1,8)||'-'||SUBSTR(RAWTOHEX(pe.ID),9,4)||'-'||
+            SUBSTR(RAWTOHEX(pe.ID),13,4)||'-'||SUBSTR(RAWTOHEX(pe.ID),17,4)||'-'||
+            SUBSTR(RAWTOHEX(pe.ID),21,12)) || '%'
+JOIN hub_owner.PEX_PROC_ELEM_EXEC pee ON pee.PARENT_ID = pe.ID
+WHERE INSTR(','||rt.SAMPLE_LIST||',', ',S001053,') > 0
+  AND pee.ITEM_STATES IS NOT NULL
+  AND pee.ITEM_STATES != '__________';
