@@ -78,34 +78,34 @@ runset_properties AS (
 -- MANUAL TEST RESULTS
 -- =========================
 SELECT
-    s.NAME                      AS "Sample Name",
-    s.SAMPLE_ID                 AS "Sample ID",
-    s.LIFE_CYCLE_STATE          AS "Sample Status",
-    ms.SAMPLE_ID                AS "Master Sample ID",
-    sp.sampling_point           AS "Sampling point",
+    s.NAME as "Sample Name",
+    s.SAMPLE_ID as "Sample ID",
+    s.LIFE_CYCLE_STATE as "Sample Status",
+    ms.SAMPLE_ID as "Master Sample ID",
+    sp.sampling_point as "Sampling point",
     TRIM(REGEXP_REPLACE(
         REPLACE(REPLACE(sp.sampling_point_description, CHR(13), ''), CHR(10), ''),
         '\s*\[[[:digit:]]+\]\s*$',''
-    ))                          AS "Sampling point description",
-    sp.line                     AS "LINE-1",
-    usr.NAME                    AS "Owner",
-    sp.product_code             AS "Product Code",
-    sp.product_description      AS "Product Description",
-    sp.cig_product_code         AS "CIG_PRODUCT_CODE",
-    sp.cig_product_description  AS "CIG_PRODUCT_DESCRIPTION",
-    sp.spec_group               AS "Spec_Group",
-    proj.NAME                   AS "Task Plan Project",
-    runset.RUNSET_ID            AS "Task Plan ID",
-    rt.LIFE_CYCLE_STATE         AS "Task Status",
-    p.DISPLAY_NAME              AS "Characteristic",
-    pv.INTERPRETATION           AS "Compose Details",
-    pv.VALUE_STRING             AS "Result",
-    pv.VALUE_TEXT               AS "Formatted result",
-    pv.LAST_UPDATED             AS "Result entered",
-    cs.NAME                     AS "Collaboration Space",
-    'MANUAL'                    AS "Result Source",
-    uom.description             AS "UOM",
-    rp.tp_project_plan          AS "Task Plan Project Plan"
+    )) as "Sampling point description",
+    sp.line as "LINE-1",
+    usr.NAME as "Owner",
+    sp.product_code as "Product Code",
+    sp.product_description as "Product Description",
+    sp.cig_product_code as "CIG_PRODUCT_CODE",
+    sp.cig_product_description as "CIG_PRODUCT_DESCRIPTION",
+    sp.spec_group as "Spec_Group",
+    proj.NAME as "Task Plan Project",
+    runset.RUNSET_ID as "Task Plan ID",
+    rt.LIFE_CYCLE_STATE as "Task Status",
+    p.DISPLAY_NAME as "Characteristic",
+    pv.INTERPRETATION as "Compose Details",
+    pv.VALUE_STRING as "Result",
+    pv.VALUE_TEXT as "Formatted result",
+    pv.LAST_UPDATED as "Result entered",
+    cs.NAME as "Collaboration Space",
+    'MANUAL' as "Result Source",
+    uom.description as "UOM",
+    rp.tp_project_plan as "Task Plan Project Plan"
 FROM hub_owner.COR_PARAMETER_VALUE pv
 JOIN hub_owner.COR_PARAMETER p
      ON pv.PARENT_IDENTITY = p.ID
@@ -123,7 +123,7 @@ LEFT JOIN hub_owner.SAM_SAMPLE ms
 LEFT JOIN hub_owner.SEC_USER usr
      ON s.OWNER_ID = usr.ID
 LEFT JOIN hub_owner.RES_PROJECT proj
-     ON runset.PROJECT_ID = proj.ID
+     ON s.PROJECT_ID = proj.ID
 LEFT JOIN sample_properties sp
      ON sp.sample_raw_id = s.ID
 LEFT JOIN runset_properties rp
@@ -147,9 +147,6 @@ UNION ALL
 
 -- =========================
 -- EQUIPMENT MEASUREMENT RESULTS
--- Join order: pe -> rt (WORK_ITEM) -> pee -> ctx -> meas_s -> s
--- then peep -> pv with ITEM_INDEX = meas_s.ROW_INDEX
--- meas_s must come before pv so ROW_INDEX is in scope
 -- =========================
 SELECT
     s.NAME,
@@ -195,10 +192,10 @@ JOIN hub_owner.RES_RETRIEVAL_CONTEXT ctx
      ON ctx.CONTEXT =
         'urn:pexelement:' ||
         LOWER(
-            SUBSTR(RAWTOHEX(pee.ID),1,8)  ||'-'||
-            SUBSTR(RAWTOHEX(pee.ID),9,4)  ||'-'||
-            SUBSTR(RAWTOHEX(pee.ID),13,4) ||'-'||
-            SUBSTR(RAWTOHEX(pee.ID),17,4) ||'-'||
+            SUBSTR(RAWTOHEX(pee.ID),1,8)||'-'||
+            SUBSTR(RAWTOHEX(pee.ID),9,4)||'-'||
+            SUBSTR(RAWTOHEX(pee.ID),13,4)||'-'||
+            SUBSTR(RAWTOHEX(pee.ID),17,4)||'-'||
             SUBSTR(RAWTOHEX(pee.ID),21,12)
         )
 JOIN hub_owner.RES_MEASUREMENTSAMPLE meas_s
@@ -217,7 +214,7 @@ LEFT JOIN hub_owner.SAM_SAMPLE ms
 LEFT JOIN hub_owner.SEC_USER usr
      ON s.OWNER_ID = usr.ID
 LEFT JOIN hub_owner.RES_PROJECT proj
-     ON runset.PROJECT_ID = proj.ID
+     ON s.PROJECT_ID = proj.ID
 LEFT JOIN sample_properties sp
      ON sp.sample_raw_id = s.ID
 LEFT JOIN hub_owner.REQ_RUNSET runset
@@ -244,4 +241,4 @@ GROUP BY
     sp.spec_group, proj.NAME, runset.RUNSET_ID,
     rt.LIFE_CYCLE_STATE, cs.NAME, peep.ID
 HAVING MAX(CASE WHEN pv.VALUE_NUMERIC IS NOT NULL
-                THEN pv.VALUE_NUMERIC END) IS NOT NULL;
+                THEN pv.VALUE_NUMERIC END) IS NOT NULL
