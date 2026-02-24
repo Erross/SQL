@@ -247,3 +247,32 @@ GROUP BY
     rt.LIFE_CYCLE_STATE, cs.NAME, peep.ID
 HAVING MAX(CASE WHEN pv.VALUE_NUMERIC IS NOT NULL
                 THEN pv.VALUE_NUMERIC END) IS NOT NULL;
+
+                --diagnostic 1
+                SELECT 
+    peep.ID as peep_id,
+    pv.SOURCE_POSITION,
+    pv.VALUE_NUMERIC,
+    pv.VALUE_STRING,
+    pv.VALUE_TEXT,
+    meas_s.SAMPLE_ID,
+    meas_s.ROW_INDEX
+FROM hub_owner.COR_PARAMETER_VALUE pv
+JOIN hub_owner.PEX_PROC_ELEM_EXEC_PARAM peep
+     ON peep.ID = pv.PARENT_IDENTITY
+JOIN hub_owner.PEX_PROC_ELEM_EXEC pee
+     ON pee.ID = peep.PARENT_ID
+JOIN hub_owner.RES_RETRIEVAL_CONTEXT ctx
+     ON ctx.CONTEXT =
+        'urn:pexelement:' ||
+        LOWER(
+            SUBSTR(RAWTOHEX(pee.ID),1,8)||'-'||
+            SUBSTR(RAWTOHEX(pee.ID),9,4)||'-'||
+            SUBSTR(RAWTOHEX(pee.ID),13,4)||'-'||
+            SUBSTR(RAWTOHEX(pee.ID),17,4)||'-'||
+            SUBSTR(RAWTOHEX(pee.ID),21,12)
+        )
+JOIN hub_owner.RES_MEASUREMENTSAMPLE meas_s
+     ON meas_s.CONTEXT_ID = ctx.ID
+WHERE meas_s.SAMPLE_ID = 'S000878'
+ORDER BY peep.ID, pv.SOURCE_POSITION, meas_s.ROW_INDEX;
