@@ -257,3 +257,28 @@ JOIN hub_owner.REQ_TASK rt
      ON INSTR(','||rt.SAMPLE_LIST||',', ','||s_mapped.SAMPLE_ID||',') > 0
 WHERE s_mapped.SAMPLE_ID IN ('S000878','S000881','S000884')
 FETCH FIRST 10 ROWS ONLY;
+
+--next diagnostic
+
+SELECT 
+    meas_s.SAMPLE_ID,
+    rt.TASK_ID,
+    rt.RUNSET_ID,
+    pv.VALUE_NUMERIC,
+    pv.VALUE_STRING,
+    peep.ID as peep_id
+FROM hub_owner.RES_MEASUREMENTSAMPLE meas_s
+JOIN hub_owner.REQ_TASK rt
+     ON INSTR(','||rt.SAMPLE_LIST||',', ','||meas_s.SAMPLE_ID||',') > 0
+JOIN hub_owner.COR_PARAMETER_VALUE pv
+     ON pv.PARENT_IDENTITY = (
+         SELECT peep2.ID 
+         FROM hub_owner.PEX_PROC_ELEM_EXEC_PARAM peep2 
+         WHERE peep2.ID = pv.PARENT_IDENTITY
+     )
+WHERE meas_s.SAMPLE_ID = 'S000878'
+
+--smol diagnositc
+
+SELECT * FROM hub_owner.pex_proc_exec 
+FETCH FIRST 5 ROWS ONLY;
