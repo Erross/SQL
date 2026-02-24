@@ -252,3 +252,14 @@ HAVING MAX(CASE WHEN pv.VALUE_NUMERIC IS NOT NULL
 FROM hub_owner.REQ_TASK rt
 LEFT JOIN hub_owner.REQ_RUNSET runset ON rt.RUNSET_ID = runset.ID
 WHERE INSTR(','||rt.SAMPLE_LIST||',', ',S001053,') > 0;
+
+SELECT 
+    rt.TASK_ID,
+    rt.LIFE_CYCLE_STATE as task_status,
+    rt.RUNSET_ID,
+    runset.RUNSET_ID as runset_id,
+    runset.LIFE_CYCLE_STATE as runset_status
+FROM hub_owner.REQ_TASK rt
+LEFT JOIN hub_owner.REQ_RUNSET runset ON rt.RUNSET_ID = runset.ID
+WHERE INSTR(','||rt.SAMPLE_LIST||',', ',S001053,') > 0
+ORDER BY rt.LAST_UPDATED DESC;
