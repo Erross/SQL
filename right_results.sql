@@ -83,34 +83,34 @@ runset_properties AS (
 -- MANUAL TEST RESULTS
 -- =========================
 SELECT
-    s.NAME as "Sample Name",
-    s.SAMPLE_ID as "Sample ID",
-    s.LIFE_CYCLE_STATE as "Sample Status",
-    ms.SAMPLE_ID as "Master Sample ID",
-    sp.sampling_point as "Sampling point",
+    s.NAME                      AS "Sample Name",
+    s.SAMPLE_ID                 AS "Sample ID",
+    s.LIFE_CYCLE_STATE          AS "Sample Status",
+    ms.SAMPLE_ID                AS "Master Sample ID",
+    sp.sampling_point           AS "Sampling point",
     TRIM(REGEXP_REPLACE(
         REPLACE(REPLACE(sp.sampling_point_description, CHR(13), ''), CHR(10), ''),
         '\s*\[[[:digit:]]+\]\s*$',''
-    )) as "Sampling point description",
-    sp.line as "LINE-1",
-    usr.NAME as "Owner",
-    sp.product_code as "Product Code",
-    sp.product_description as "Product Description",
-    sp.cig_product_code as "CIG_PRODUCT_CODE",
-    sp.cig_product_description as "CIG_PRODUCT_DESCRIPTION",
-    sp.spec_group as "Spec_Group",
-    proj.NAME as "Task Plan Project",
-    runset.RUNSET_ID as "Task Plan ID",
-    rt.LIFE_CYCLE_STATE as "Task Status",
-    p.DISPLAY_NAME as "Characteristic",
-    pv.INTERPRETATION as "Compose Details",
-    pv.VALUE_STRING as "Result",
-    pv.VALUE_TEXT as "Formatted result",
-    pv.LAST_UPDATED as "Result entered",
-    cs.NAME as "Collaboration Space",
-    'MANUAL' as "Result Source",
-    uom.description as "UOM",
-    rp.tp_project_plan as "Task Plan Project Plan"
+    ))                          AS "Sampling point description",
+    sp.line                     AS "LINE-1",
+    usr.NAME                    AS "Owner",
+    sp.product_code             AS "Product Code",
+    sp.product_description      AS "Product Description",
+    sp.cig_product_code         AS "CIG_PRODUCT_CODE",
+    sp.cig_product_description  AS "CIG_PRODUCT_DESCRIPTION",
+    sp.spec_group               AS "Spec_Group",
+    proj.NAME                   AS "Task Plan Project",
+    runset.RUNSET_ID            AS "Task Plan ID",
+    rt.LIFE_CYCLE_STATE         AS "Task Status",
+    p.DISPLAY_NAME              AS "Characteristic",
+    pv.INTERPRETATION           AS "Compose Details",
+    pv.VALUE_STRING             AS "Result",
+    pv.VALUE_TEXT               AS "Formatted result",
+    pv.LAST_UPDATED             AS "Result entered",
+    cs.NAME                     AS "Collaboration Space",
+    'MANUAL'                    AS "Result Source",
+    uom.description             AS "UOM",
+    rp.tp_project_plan          AS "Task Plan Project Plan"
 FROM hub_owner.COR_PARAMETER_VALUE pv
 JOIN hub_owner.COR_PARAMETER p
      ON pv.PARENT_IDENTITY = p.ID
@@ -121,8 +121,7 @@ JOIN hub_owner.REQ_TASK rt
 LEFT JOIN hub_owner.REQ_RUNSET runset
      ON rt.RUNSET_ID = runset.ID
 LEFT JOIN hub_owner.SAM_SAMPLE s
-     ON s.SAMPLE_ID =
-        REGEXP_SUBSTR(rt.SAMPLE_LIST, '[^,]+', 1, pv.ITEM_INDEX + 1)
+     ON s.SAMPLE_ID = REGEXP_SUBSTR(rt.SAMPLE_LIST, '[^,]+', 1, pv.ITEM_INDEX + 1)
 LEFT JOIN hub_owner.SAM_SAMPLE ms
      ON s.MASTER_SAMPLE_ID = ms.ID
 LEFT JOIN hub_owner.SEC_USER usr
@@ -185,27 +184,29 @@ SELECT
 FROM hub_owner.COR_PARAMETER_VALUE pv
 JOIN hub_owner.PEX_PROC_ELEM_EXEC_PARAM peep
      ON peep.ID = pv.PARENT_IDENTITY
+     -- KEY FIX: pin pv row to the correct sample position in the batch
+     AND pv.ITEM_INDEX = meas_s.ROW_INDEX
 JOIN hub_owner.PEX_PROC_ELEM_EXEC pee
      ON pee.ID = peep.PARENT_ID
 JOIN hub_owner.PEX_PROC_EXEC pe
      ON pe.ID = pee.PARENT_ID
--- Direct 1:1 join from process execution to task via WORK_ITEM URN - eliminates fan-out
+-- Direct 1:1 join from process execution to task via WORK_ITEM URN
 JOIN hub_owner.REQ_TASK rt
      ON rt.WORK_ITEM LIKE '%' || LOWER(
-            SUBSTR(RAWTOHEX(pe.ID),1,8)||'-'||
-            SUBSTR(RAWTOHEX(pe.ID),9,4)||'-'||
-            SUBSTR(RAWTOHEX(pe.ID),13,4)||'-'||
-            SUBSTR(RAWTOHEX(pe.ID),17,4)||'-'||
+            SUBSTR(RAWTOHEX(pe.ID),1,8)  ||'-'||
+            SUBSTR(RAWTOHEX(pe.ID),9,4)  ||'-'||
+            SUBSTR(RAWTOHEX(pe.ID),13,4) ||'-'||
+            SUBSTR(RAWTOHEX(pe.ID),17,4) ||'-'||
             SUBSTR(RAWTOHEX(pe.ID),21,12)
         ) || '%'
 JOIN hub_owner.RES_RETRIEVAL_CONTEXT ctx
      ON ctx.CONTEXT =
         'urn:pexelement:' ||
         LOWER(
-            SUBSTR(RAWTOHEX(pee.ID),1,8)||'-'||
-            SUBSTR(RAWTOHEX(pee.ID),9,4)||'-'||
-            SUBSTR(RAWTOHEX(pee.ID),13,4)||'-'||
-            SUBSTR(RAWTOHEX(pee.ID),17,4)||'-'||
+            SUBSTR(RAWTOHEX(pee.ID),1,8)  ||'-'||
+            SUBSTR(RAWTOHEX(pee.ID),9,4)  ||'-'||
+            SUBSTR(RAWTOHEX(pee.ID),13,4) ||'-'||
+            SUBSTR(RAWTOHEX(pee.ID),17,4) ||'-'||
             SUBSTR(RAWTOHEX(pee.ID),21,12)
         )
 JOIN hub_owner.RES_MEASUREMENTSAMPLE meas_s
@@ -247,31 +248,3 @@ GROUP BY
     rt.LIFE_CYCLE_STATE, cs.NAME, peep.ID
 HAVING MAX(CASE WHEN pv.VALUE_NUMERIC IS NOT NULL
                 THEN pv.VALUE_NUMERIC END) IS NOT NULL;
-
-                --diagnostic 1
-    SELECT 
-    peep.ID          AS peep_id,
-    peep.SOURCE_POSITION,
-    pv.VALUE_NUMERIC,
-    pv.VALUE_STRING,
-    meas_s.SAMPLE_ID,
-    meas_s.ROW_INDEX
-FROM hub_owner.COR_PARAMETER_VALUE pv
-JOIN hub_owner.PEX_PROC_ELEM_EXEC_PARAM peep
-     ON peep.ID = pv.PARENT_IDENTITY
-JOIN hub_owner.PEX_PROC_ELEM_EXEC pee
-     ON pee.ID = peep.PARENT_ID
-JOIN hub_owner.RES_RETRIEVAL_CONTEXT ctx
-     ON ctx.CONTEXT =
-        'urn:pexelement:' ||
-        LOWER(
-            SUBSTR(RAWTOHEX(pee.ID),1,8)||'-'||
-            SUBSTR(RAWTOHEX(pee.ID),9,4)||'-'||
-            SUBSTR(RAWTOHEX(pee.ID),13,4)||'-'||
-            SUBSTR(RAWTOHEX(pee.ID),17,4)||'-'||
-            SUBSTR(RAWTOHEX(pee.ID),21,12)
-        )
-JOIN hub_owner.RES_MEASUREMENTSAMPLE meas_s
-     ON meas_s.CONTEXT_ID = ctx.ID
-WHERE meas_s.SAMPLE_ID = 'S000878'
-ORDER BY peep.ID, peep.SOURCE_POSITION, meas_s.ROW_INDEX;
