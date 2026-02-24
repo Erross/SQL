@@ -294,3 +294,19 @@ ORDER BY rt.TASK_ID;
 
 SELECT * FROM hub_owner.pex_proc_exec 
 FETCH FIRST 5 ROWS ONLY;
+
+SELECT 
+    rt.TASK_ID,
+    rt.WORK_ITEM,
+    RAWTOHEX(pe.ID) as pe_id_hex
+FROM hub_owner.REQ_TASK rt
+JOIN hub_owner.PEX_PROC_EXEC pe 
+     ON rt.WORK_ITEM LIKE '%' || LOWER(
+            SUBSTR(RAWTOHEX(pe.ID),1,8)||'-'||
+            SUBSTR(RAWTOHEX(pe.ID),9,4)||'-'||
+            SUBSTR(RAWTOHEX(pe.ID),13,4)||'-'||
+            SUBSTR(RAWTOHEX(pe.ID),17,4)||'-'||
+            SUBSTR(RAWTOHEX(pe.ID),21,12)
+        ) || '%'
+WHERE rt.SAMPLE_LIST LIKE '%S000878%'
+FETCH FIRST 10 ROWS ONLY;
