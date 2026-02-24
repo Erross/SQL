@@ -243,3 +243,17 @@ GROUP BY
     rt.LIFE_CYCLE_STATE, cs.NAME, peep.ID
 HAVING MAX(CASE WHEN pv.VALUE_NUMERIC IS NOT NULL
                 THEN pv.VALUE_NUMERIC END) IS NOT NULL;
+
+                SELECT 
+    meas_s.SAMPLE_ID     AS meas_sample_id,
+    meas_s.ROW_INDEX,
+    RAWTOHEX(meas_s.MAPPED_SAMPLE_ID) AS mapped_id_hex,
+    s_mapped.SAMPLE_ID   AS mapped_sample_id,
+    rt.SAMPLE_LIST
+FROM hub_owner.RES_MEASUREMENTSAMPLE meas_s
+JOIN hub_owner.SAM_SAMPLE s_mapped 
+     ON s_mapped.ID = meas_s.MAPPED_SAMPLE_ID
+JOIN hub_owner.REQ_TASK rt
+     ON INSTR(','||rt.SAMPLE_LIST||',', ','||s_mapped.SAMPLE_ID||',') > 0
+WHERE s_mapped.SAMPLE_ID IN ('S000878','S000881','S000884')
+FETCH FIRST 10 ROWS ONLY;
