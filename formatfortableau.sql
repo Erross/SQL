@@ -241,4 +241,14 @@ GROUP BY
     sp.spec_group, proj.NAME, runset.RUNSET_ID,
     rt.LIFE_CYCLE_STATE, cs.NAME, peep.ID
 HAVING MAX(CASE WHEN pv.VALUE_NUMERIC IS NOT NULL
-                THEN pv.VALUE_NUMERIC END) IS NOT NULL
+                THEN pv.VALUE_NUMERIC END) IS NOT NULL;
+
+                SELECT 
+    rt.TASK_ID,
+    rt.LIFE_CYCLE_STATE as task_status,
+    rt.SAMPLE_LIST,
+    runset.RUNSET_ID,
+    runset.LIFE_CYCLE_STATE as runset_status
+FROM hub_owner.REQ_TASK rt
+LEFT JOIN hub_owner.REQ_RUNSET runset ON rt.RUNSET_ID = runset.ID
+WHERE INSTR(','||rt.SAMPLE_LIST||',', ',S001053,') > 0;
