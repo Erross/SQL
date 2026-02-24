@@ -272,3 +272,14 @@ SELECT
 FROM hub_owner.REQ_RUNSET runset
 JOIN hub_owner.REQ_TASK rt ON rt.RUNSET_ID = runset.ID
 WHERE INSTR(','||rt.SAMPLE_LIST||',', ',S001053,') > 0;
+
+SELECT 
+    se.EVENT_TYPE,
+    se.LIFE_CYCLE_STATE,
+    se.EVENT_TIME,
+    se.EVENT_DATA,
+    se.EVENT_CONTEXT
+FROM hub_owner.SAM_SAMPLE_EVENT se
+JOIN hub_owner.SAM_SAMPLE s ON s.ID = se.SAMPLE_ID
+WHERE s.SAMPLE_ID = 'S001053'
+ORDER BY se.EVENT_TIME DESC;
