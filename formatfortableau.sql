@@ -323,3 +323,16 @@ JOIN hub_owner.REQ_TASK_PARAMETER rtp ON p.ID = rtp.PARAMETER_ID
 JOIN hub_owner.REQ_TASK rt ON rtp.TASK_ID = rt.ID
 WHERE INSTR(','||rt.SAMPLE_LIST||',', ',S001053,') > 0
 ORDER BY pv.ITEM_INDEX, pv.VALUE_KEY;
+
+SELECT 
+    rt.SAMPLE_LIST,
+    pee.ITEM_STATES,
+    pee.STATE
+FROM hub_owner.REQ_TASK rt
+JOIN hub_owner.PEX_PROC_EXEC pe
+     ON rt.WORK_ITEM LIKE '%' || LOWER(
+            SUBSTR(RAWTOHEX(pe.ID),1,8)||'-'||SUBSTR(RAWTOHEX(pe.ID),9,4)||'-'||
+            SUBSTR(RAWTOHEX(pe.ID),13,4)||'-'||SUBSTR(RAWTOHEX(pe.ID),17,4)||'-'||
+            SUBSTR(RAWTOHEX(pe.ID),21,12)) || '%'
+JOIN hub_owner.PEX_PROC_ELEM_EXEC pee ON pee.PARENT_ID = pe.ID
+WHERE INSTR(','||rt.SAMPLE_LIST||',', ',S001053,') > 0;
