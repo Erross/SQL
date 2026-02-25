@@ -343,3 +343,30 @@ WHERE s.SAMPLE_ID IN ('S000514', 'S000661')
   AND pee2.ITEM_STATES IS NOT NULL
   AND pee2.ITEM_STATES NOT LIKE '%\_%' ESCAPE '\'
 ORDER BY s.SAMPLE_ID, pv.ITEM_INDEX, pee2.ITEM_STATES;
+
+-- find position better
+
+SELECT DISTINCT
+    rt.TASK_ID,
+    rt.SAMPLE_LIST,
+    pee.ITEM_STATES,
+    pee.SOURCE_POSITION,
+    pee.PROCESS_NUMBER,
+    peep.ID         AS peep_id,
+    peep.SOURCE_POSITION AS peep_source_pos,
+    pv.ITEM_INDEX,
+    REGEXP_SUBSTR(rt.SAMPLE_LIST, '[^,]+', 1, pv.ITEM_INDEX + 1) AS sample_at_index
+FROM hub_owner.REQ_TASK rt
+JOIN hub_owner.PEX_PROC_EXEC pe
+     ON rt.WORK_ITEM LIKE '%' || LOWER(
+            SUBSTR(RAWTOHEX(pe.ID),1,8)||'-'||SUBSTR(RAWTOHEX(pe.ID),9,4)||'-'||
+            SUBSTR(RAWTOHEX(pe.ID),13,4)||'-'||SUBSTR(RAWTOHEX(pe.ID),17,4)||'-'||
+            SUBSTR(RAWTOHEX(pe.ID),21,12)) || '%'
+JOIN hub_owner.PEX_PROC_ELEM_EXEC pee ON pee.PARENT_ID = pe.ID
+JOIN hub_owner.PEX_PROC_ELEM_EXEC_PARAM peep ON peep.PARENT_ID = pee.ID
+JOIN hub_owner.COR_PARAMETER_VALUE pv ON pv.PARENT_IDENTITY = peep.ID
+WHERE rt.TASK_ID IN ('T156', 'T185')
+  AND pee.ITEM_STATES IS NOT NULL
+  AND pee.ITEM_STATES NOT LIKE '%\_%' ESCAPE '\'
+  AND pv.VALUE_KEY = 'A'
+ORDER BY rt.TASK_ID, pee.ITEM_STATES, pv.ITEM_INDEX;
