@@ -314,3 +314,32 @@ GROUP BY
     pe.ID, meas_s.ROW_INDEX, rp.tp_project_plan
 HAVING MAX(CASE WHEN pv.VALUE_NUMERIC IS NOT NULL
                 THEN pv.VALUE_NUMERIC END) IS NOT NULL;
+
+                ----checker
+
+                SELECT
+    s.SAMPLE_ID,
+    pv.ITEM_INDEX,
+    pv.ITEM_INDEX + 1                                     AS lookup_pos,
+    p.DISPLAY_NAME                                        AS characteristic,
+    rt.TASK_ID,
+    rt.SAMPLE_LIST,
+    pee2.ITEM_STATES,
+    SUBSTR(pee2.ITEM_STATES, pv.ITEM_INDEX + 1, 1)        AS char_at_pos
+FROM hub_owner.COR_PARAMETER_VALUE pv
+JOIN hub_owner.COR_PARAMETER p       ON pv.PARENT_IDENTITY = p.ID
+JOIN hub_owner.REQ_TASK_PARAMETER rtp ON p.ID = rtp.PARAMETER_ID
+JOIN hub_owner.REQ_TASK rt           ON rtp.TASK_ID = rt.ID
+JOIN hub_owner.SAM_SAMPLE s
+     ON s.SAMPLE_ID = REGEXP_SUBSTR(rt.SAMPLE_LIST, '[^,]+', 1, pv.ITEM_INDEX + 1)
+JOIN hub_owner.PEX_PROC_EXEC pe2
+     ON rt.WORK_ITEM LIKE '%' || LOWER(
+            SUBSTR(RAWTOHEX(pe2.ID),1,8)||'-'||SUBSTR(RAWTOHEX(pe2.ID),9,4)||'-'||
+            SUBSTR(RAWTOHEX(pe2.ID),13,4)||'-'||SUBSTR(RAWTOHEX(pe2.ID),17,4)||'-'||
+            SUBSTR(RAWTOHEX(pe2.ID),21,12)) || '%'
+JOIN hub_owner.PEX_PROC_ELEM_EXEC pee2 ON pee2.PARENT_ID = pe2.ID
+WHERE s.SAMPLE_ID IN ('S000514', 'S000661')
+  AND pv.VALUE_KEY = 'A'
+  AND pee2.ITEM_STATES IS NOT NULL
+  AND pee2.ITEM_STATES NOT LIKE '%\_%' ESCAPE '\'
+ORDER BY s.SAMPLE_ID, pv.ITEM_INDEX, pee2.ITEM_STATES;
