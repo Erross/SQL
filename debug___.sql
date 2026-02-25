@@ -176,9 +176,6 @@ UNION ALL
 SELECT
     s.NAME,
     s.SAMPLE_ID,
-SELECT
-    s.NAME,
-    s.SAMPLE_ID,
     (SELECT CASE
                  WHEN MAX(CASE WHEN pee2.ITEM_STATES NOT LIKE '%\_%' ESCAPE '\'
                                THEN SUBSTR(pee2.ITEM_STATES, meas_s.ROW_INDEX + 1, 1)
@@ -222,6 +219,7 @@ SELECT
      WHERE pee2.PARENT_ID = pe.ID
        AND pee2.ITEM_STATES IS NOT NULL
     )
+FROM hub_owner.PEX_PROC_EXEC pe
 JOIN hub_owner.REQ_TASK rt
      ON rt.WORK_ITEM LIKE '%' || LOWER(
             SUBSTR(RAWTOHEX(pe.ID),1,8)  ||'-'||
@@ -283,6 +281,7 @@ GROUP BY
     usr.NAME, sp.product_code, sp.product_description,
     sp.cig_product_code, sp.cig_product_description,
     sp.spec_group, proj.NAME, runset.RUNSET_ID,
-    rt.LIFE_CYCLE_STATE, cs.NAME, peep.ID
+    rt.LIFE_CYCLE_STATE, cs.NAME, peep.ID,
+    pe.ID, meas_s.ROW_INDEX
 HAVING MAX(CASE WHEN pv.VALUE_NUMERIC IS NOT NULL
-                THEN pv.VALUE_NUMERIC END) IS NOT NULL
+                THEN pv.VALUE_NUMERIC END) IS NOT NULL;
