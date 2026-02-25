@@ -176,15 +176,22 @@ UNION ALL
 SELECT
     s.NAME,
     s.SAMPLE_ID,
-    CASE
-        WHEN MAX(CASE WHEN pee.ITEM_STATES NOT LIKE '%\_%' ESCAPE '\'
-                      THEN SUBSTR(pee.ITEM_STATES, meas_s.ROW_INDEX + 1, 1)
-                 END) = 'X' THEN 'abandoned'
-        WHEN MAX(CASE WHEN pee.ITEM_STATES NOT LIKE '%\_%' ESCAPE '\'
-                      THEN SUBSTR(pee.ITEM_STATES, meas_s.ROW_INDEX + 1, 1)
-                 END) = 'D' THEN 'completed'
-        ELSE MAX(s.LIFE_CYCLE_STATE)
-    END,
+SELECT
+    s.NAME,
+    s.SAMPLE_ID,
+    (SELECT CASE
+                 WHEN MAX(CASE WHEN pee2.ITEM_STATES NOT LIKE '%\_%' ESCAPE '\'
+                               THEN SUBSTR(pee2.ITEM_STATES, meas_s.ROW_INDEX + 1, 1)
+                          END) = 'X' THEN 'abandoned'
+                 WHEN MAX(CASE WHEN pee2.ITEM_STATES NOT LIKE '%\_%' ESCAPE '\'
+                               THEN SUBSTR(pee2.ITEM_STATES, meas_s.ROW_INDEX + 1, 1)
+                          END) = 'D' THEN 'completed'
+                 ELSE MAX(s.LIFE_CYCLE_STATE)
+            END
+     FROM hub_owner.PEX_PROC_ELEM_EXEC pee2
+     WHERE pee2.PARENT_ID = pe.ID
+       AND pee2.ITEM_STATES IS NOT NULL
+    ),
     ms.SAMPLE_ID,
     sp.sampling_point,
     TRIM(REGEXP_REPLACE(
@@ -210,8 +217,11 @@ SELECT
     'EQUIPMENT',
     MAX(uom.description),
     rp.tp_project_plan,
-    MAX(CASE WHEN pee.ITEM_STATES NOT LIKE '%\_%' ESCAPE '\' THEN pee.ITEM_STATES END)
-FROM hub_owner.PEX_PROC_EXEC pe
+    (SELECT MAX(CASE WHEN pee2.ITEM_STATES NOT LIKE '%\_%' ESCAPE '\' THEN pee2.ITEM_STATES END)
+     FROM hub_owner.PEX_PROC_ELEM_EXEC pee2
+     WHERE pee2.PARENT_ID = pe.ID
+       AND pee2.ITEM_STATES IS NOT NULL
+    )
 JOIN hub_owner.REQ_TASK rt
      ON rt.WORK_ITEM LIKE '%' || LOWER(
             SUBSTR(RAWTOHEX(pe.ID),1,8)  ||'-'||
