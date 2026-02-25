@@ -129,7 +129,8 @@ SELECT
                 SUBSTR(RAWTOHEX(pe2.ID),13,4)||'-'||SUBSTR(RAWTOHEX(pe2.ID),17,4)||'-'||
                 SUBSTR(RAWTOHEX(pe2.ID),21,12)) || '%'
        AND pee2.ITEM_STATES IS NOT NULL
-    ) as "Item States (Debug)"
+    ) as "Item States (Debug)",
+    rp.tp_project_plan as "Task Plan Project Plan"
 FROM hub_owner.COR_PARAMETER_VALUE pv
 JOIN hub_owner.COR_PARAMETER p
      ON pv.PARENT_IDENTITY = p.ID
