@@ -663,3 +663,82 @@ GROUP BY
     pe.ID, meas_s.ROW_INDEX, rp.tp_project_plan
 HAVING MAX(CASE WHEN pv.VALUE_NUMERIC IS NOT NULL
                 THEN pv.VALUE_NUMERIC END) IS NOT NULL;
+
+                -------TP064 why?
+
+SELECT
+    runset.RUNSET_ID                                            AS "Task Plan ID",
+    rt.TASK_ID                                                  AS "Task ID",
+    rt.LIFE_CYCLE_STATE                                         AS "Task Status",
+    rt.SAMPLE_LIST                                              AS "Sample List",
+    REGEXP_COUNT(rt.SAMPLE_LIST, ',') + 1                       AS "N (samples in list)",
+    s.SAMPLE_ID                                                 AS "Sample ID",
+    s.LIFE_CYCLE_STATE                                          AS "SAM_SAMPLE LC State",
+    pv.ITEM_INDEX                                               AS "pv.ITEM_INDEX",
+    pee.ITEM_STATES                                             AS "ITEM_STATES (raw)",
+    LENGTH(pee.ITEM_STATES)                                     AS "ITEM_STATES length",
+    -- The periodic positions this sample occupies (1-based), shown as a string
+    LISTAGG(
+        pv.ITEM_INDEX + 1 + (lv.lvl - 1) * (REGEXP_COUNT(rt.SAMPLE_LIST, ',') + 1),
+        ','
+    ) WITHIN GROUP (ORDER BY lv.lvl)                           AS "Positions checked",
+    -- The characters at each of those positions
+    LISTAGG(
+        SUBSTR(pee.ITEM_STATES,
+               pv.ITEM_INDEX + 1 + (lv.lvl - 1) * (REGEXP_COUNT(rt.SAMPLE_LIST, ',') + 1),
+               1),
+        ','
+    ) WITHIN GROUP (ORDER BY lv.lvl)                           AS "Chars at positions",
+    -- What the query derives
+    CASE
+        WHEN MAX(CASE WHEN
+                 SUBSTR(pee.ITEM_STATES,
+                        pv.ITEM_INDEX + 1 + (lv.lvl - 1) * (REGEXP_COUNT(rt.SAMPLE_LIST, ',') + 1),
+                        1) = 'X' THEN 1 END) = 1 THEN 'abandoned'
+        WHEN MAX(CASE WHEN
+                 SUBSTR(pee.ITEM_STATES,
+                        pv.ITEM_INDEX + 1 + (lv.lvl - 1) * (REGEXP_COUNT(rt.SAMPLE_LIST, ',') + 1),
+                        1) = 'D' THEN 1 END) = 1 THEN 'completed'
+        ELSE s.LIFE_CYCLE_STATE
+    END                                                         AS "Derived Status"
+FROM hub_owner.REQ_RUNSET runset
+JOIN hub_owner.REQ_TASK rt
+     ON rt.RUNSET_ID = runset.ID
+JOIN hub_owner.COR_PARAMETER_VALUE pv
+     ON 1=1  -- just need pv for ITEM_INDEX; filter below limits to one pv row per sample
+JOIN hub_owner.COR_PARAMETER p
+     ON pv.PARENT_IDENTITY = p.ID
+JOIN hub_owner.REQ_TASK_PARAMETER rtp
+     ON p.ID = rtp.PARAMETER_ID
+     AND rtp.TASK_ID = rt.ID
+JOIN hub_owner.SAM_SAMPLE s
+     ON s.SAMPLE_ID = REGEXP_SUBSTR(rt.SAMPLE_LIST, '[^,]+', 1, pv.ITEM_INDEX + 1)
+JOIN hub_owner.PEX_PROC_EXEC pe
+     ON rt.WORK_ITEM LIKE '%' || LOWER(
+            SUBSTR(RAWTOHEX(pe.ID),1,8)||'-'||SUBSTR(RAWTOHEX(pe.ID),9,4)||'-'||
+            SUBSTR(RAWTOHEX(pe.ID),13,4)||'-'||SUBSTR(RAWTOHEX(pe.ID),17,4)||'-'||
+            SUBSTR(RAWTOHEX(pe.ID),21,12)) || '%'
+JOIN hub_owner.PEX_PROC_ELEM_EXEC pee
+     ON pee.PARENT_ID = pe.ID
+     AND pee.ITEM_STATES IS NOT NULL
+     AND pee.ITEM_STATES NOT LIKE '%\_%' ESCAPE '\'
+-- Generate level numbers up to the max repetitions we'd ever need
+JOIN (SELECT LEVEL AS lvl FROM DUAL
+      CONNECT BY LEVEL <= 50) lv
+     ON pv.ITEM_INDEX + 1 + (lv.lvl - 1) * (REGEXP_COUNT(rt.SAMPLE_LIST, ',') + 1)
+        <= LENGTH(pee.ITEM_STATES)
+WHERE runset.RUNSET_ID = 'TP064'
+  AND pv.VALUE_KEY = 'A'
+  AND pv.VALUE_STRING IS NOT NULL
+  AND s.SAMPLE_ID IS NOT NULL
+GROUP BY
+    runset.RUNSET_ID,
+    rt.TASK_ID,
+    rt.LIFE_CYCLE_STATE,
+    rt.SAMPLE_LIST,
+    s.SAMPLE_ID,
+    s.LIFE_CYCLE_STATE,
+    pv.ITEM_INDEX,
+    pee.ITEM_STATES
+ORDER BY
+    rt.TASK_ID, pv.ITEM_INDEX;
