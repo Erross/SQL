@@ -76,10 +76,36 @@ runset_properties AS (
 
 -- =========================
 -- MANUAL TEST RESULTS
+-- 1  Sample Name
+-- 2  Sample ID
+-- 3  Sample Status
+-- 4  Master Sample ID
+-- 5  Sampling point
+-- 6  Sampling point description
+-- 7  LINE-1
+-- 8  Owner
+-- 9  Product Code
+-- 10 Product Description
+-- 11 CIG_PRODUCT_CODE
+-- 12 CIG_PRODUCT_DESCRIPTION
+-- 13 Spec_Group
+-- 14 Task Plan Project
+-- 15 Task Plan ID
+-- 16 Task Status
+-- 17 Characteristic
+-- 18 Compose Details
+-- 19 Result
+-- 20 Formatted result
+-- 21 Result entered
+-- 22 Collaboration Space
+-- 23 Result Source
+-- 24 UOM
+-- 25 Item States (Debug)
+-- 26 Task Plan Project Plan
 -- =========================
 SELECT
-    s.NAME as "Sample Name",
-    s.SAMPLE_ID as "Sample ID",
+    s.NAME                      AS "Sample Name",
+    s.SAMPLE_ID                 AS "Sample ID",
     (SELECT CASE
                  WHEN MAX(CASE WHEN pee2.ITEM_STATES NOT LIKE '%\_%' ESCAPE '\'
                                THEN SUBSTR(pee2.ITEM_STATES, pv.ITEM_INDEX + 1, 1)
@@ -96,32 +122,33 @@ SELECT
                 SUBSTR(RAWTOHEX(pe2.ID),13,4)||'-'||SUBSTR(RAWTOHEX(pe2.ID),17,4)||'-'||
                 SUBSTR(RAWTOHEX(pe2.ID),21,12)) || '%'
        AND pee2.ITEM_STATES IS NOT NULL
-    ) as "Sample Status",
-    ms.SAMPLE_ID as "Master Sample ID",
-    sp.sampling_point as "Sampling point",
+    )                           AS "Sample Status",
+    ms.SAMPLE_ID                AS "Master Sample ID",
+    sp.sampling_point           AS "Sampling point",
     TRIM(REGEXP_REPLACE(
         REPLACE(REPLACE(sp.sampling_point_description, CHR(13), ''), CHR(10), ''),
         '\s*\[[[:digit:]]+\]\s*$',''
-    )) as "Sampling point description",
-    sp.line as "LINE-1",
-    usr.NAME as "Owner",
-    sp.product_code as "Product Code",
-    sp.product_description as "Product Description",
-    sp.cig_product_code as "CIG_PRODUCT_CODE",
-    sp.cig_product_description as "CIG_PRODUCT_DESCRIPTION",
-    sp.spec_group as "Spec_Group",
-    proj.NAME as "Task Plan Project",
-    runset.RUNSET_ID as "Task Plan ID",
-    rt.LIFE_CYCLE_STATE as "Task Status",
-    p.DISPLAY_NAME as "Characteristic",
-    pv.INTERPRETATION as "Compose Details",
-    pv.VALUE_STRING as "Result",
-    pv.VALUE_TEXT as "Formatted result",
-    pv.LAST_UPDATED as "Result entered",
-    cs.NAME as "Collaboration Space",
-    'MANUAL' as "Result Source",
-    uom.description as "UOM",
-    (SELECT MAX(CASE WHEN pee2.ITEM_STATES NOT LIKE '%\_%' ESCAPE '\' THEN pee2.ITEM_STATES END)
+    ))                          AS "Sampling point description",
+    sp.line                     AS "LINE-1",
+    usr.NAME                    AS "Owner",
+    sp.product_code             AS "Product Code",
+    sp.product_description      AS "Product Description",
+    sp.cig_product_code         AS "CIG_PRODUCT_CODE",
+    sp.cig_product_description  AS "CIG_PRODUCT_DESCRIPTION",
+    sp.spec_group               AS "Spec_Group",
+    proj.NAME                   AS "Task Plan Project",
+    runset.RUNSET_ID            AS "Task Plan ID",
+    rt.LIFE_CYCLE_STATE         AS "Task Status",
+    p.DISPLAY_NAME              AS "Characteristic",
+    pv.INTERPRETATION           AS "Compose Details",
+    pv.VALUE_STRING             AS "Result",
+    pv.VALUE_TEXT               AS "Formatted result",
+    pv.LAST_UPDATED             AS "Result entered",
+    cs.NAME                     AS "Collaboration Space",
+    'MANUAL'                    AS "Result Source",
+    uom.description             AS "UOM",
+    (SELECT MAX(CASE WHEN pee2.ITEM_STATES NOT LIKE '%\_%' ESCAPE '\'
+                     THEN pee2.ITEM_STATES END)
      FROM hub_owner.PEX_PROC_EXEC pe2
      JOIN hub_owner.PEX_PROC_ELEM_EXEC pee2 ON pee2.PARENT_ID = pe2.ID
      WHERE rt.WORK_ITEM LIKE '%' || LOWER(
@@ -129,8 +156,8 @@ SELECT
                 SUBSTR(RAWTOHEX(pe2.ID),13,4)||'-'||SUBSTR(RAWTOHEX(pe2.ID),17,4)||'-'||
                 SUBSTR(RAWTOHEX(pe2.ID),21,12)) || '%'
        AND pee2.ITEM_STATES IS NOT NULL
-    ) as "Item States (Debug)",
-    rp.tp_project_plan as "Task Plan Project Plan"
+    )                           AS "Item States (Debug)",
+    rp.tp_project_plan          AS "Task Plan Project Plan"
 FROM hub_owner.COR_PARAMETER_VALUE pv
 JOIN hub_owner.COR_PARAMETER p
      ON pv.PARENT_IDENTITY = p.ID
@@ -172,53 +199,55 @@ UNION ALL
 
 -- =========================
 -- EQUIPMENT MEASUREMENT RESULTS
+-- Column order matches manual exactly
 -- =========================
 SELECT
-    s.NAME,
-    s.SAMPLE_ID,
-    (SELECT CASE
+    s.NAME,                                                                          -- 1  Sample Name
+    s.SAMPLE_ID,                                                                     -- 2  Sample ID
+    (SELECT CASE                                                                     -- 3  Sample Status
                  WHEN MAX(CASE WHEN pee2.ITEM_STATES NOT LIKE '%\_%' ESCAPE '\'
                                THEN SUBSTR(pee2.ITEM_STATES, meas_s.ROW_INDEX + 1, 1)
                           END) = 'X' THEN 'abandoned'
                  WHEN MAX(CASE WHEN pee2.ITEM_STATES NOT LIKE '%\_%' ESCAPE '\'
                                THEN SUBSTR(pee2.ITEM_STATES, meas_s.ROW_INDEX + 1, 1)
                           END) = 'D' THEN 'completed'
-                 ELSE MAX(s.LIFE_CYCLE_STATE)
+                 ELSE s.LIFE_CYCLE_STATE
             END
      FROM hub_owner.PEX_PROC_ELEM_EXEC pee2
      WHERE pee2.PARENT_ID = pe.ID
        AND pee2.ITEM_STATES IS NOT NULL
     ),
-    ms.SAMPLE_ID,
-    sp.sampling_point,
-    TRIM(REGEXP_REPLACE(
+    ms.SAMPLE_ID,                                                                    -- 4  Master Sample ID
+    sp.sampling_point,                                                               -- 5  Sampling point
+    TRIM(REGEXP_REPLACE(                                                             -- 6  Sampling point description
         REPLACE(REPLACE(sp.sampling_point_description, CHR(13), ''), CHR(10), ''),
         '\s*\[[[:digit:]]+\]\s*$',''
     )),
-    sp.line,
-    usr.NAME,
-    sp.product_code,
-    sp.product_description,
-    sp.cig_product_code,
-    sp.cig_product_description,
-    sp.spec_group,
-    proj.NAME,
-    runset.RUNSET_ID,
-    rt.LIFE_CYCLE_STATE,
-    MAX(CASE WHEN pv.VALUE_STRING IS NOT NULL THEN pv.VALUE_STRING END),
-    NULL,
-    TO_CHAR(MAX(CASE WHEN pv.VALUE_NUMERIC IS NOT NULL THEN pv.VALUE_NUMERIC END)),
-    TO_CHAR(MAX(CASE WHEN pv.VALUE_NUMERIC IS NOT NULL THEN pv.VALUE_NUMERIC END)),
-    MAX(pv.LAST_UPDATED),
-    cs.NAME,
-    'EQUIPMENT',
-    MAX(uom.description),
-    rp.tp_project_plan,
-    (SELECT MAX(CASE WHEN pee2.ITEM_STATES NOT LIKE '%\_%' ESCAPE '\' THEN pee2.ITEM_STATES END)
+    sp.line,                                                                         -- 7  LINE-1
+    usr.NAME,                                                                        -- 8  Owner
+    sp.product_code,                                                                 -- 9  Product Code
+    sp.product_description,                                                          -- 10 Product Description
+    sp.cig_product_code,                                                             -- 11 CIG_PRODUCT_CODE
+    sp.cig_product_description,                                                      -- 12 CIG_PRODUCT_DESCRIPTION
+    sp.spec_group,                                                                   -- 13 Spec_Group
+    proj.NAME,                                                                       -- 14 Task Plan Project
+    runset.RUNSET_ID,                                                                -- 15 Task Plan ID
+    rt.LIFE_CYCLE_STATE,                                                             -- 16 Task Status
+    MAX(CASE WHEN pv.VALUE_STRING IS NOT NULL THEN pv.VALUE_STRING END),             -- 17 Characteristic
+    NULL,                                                                            -- 18 Compose Details
+    TO_CHAR(MAX(CASE WHEN pv.VALUE_NUMERIC IS NOT NULL THEN pv.VALUE_NUMERIC END)),  -- 19 Result
+    TO_CHAR(MAX(CASE WHEN pv.VALUE_NUMERIC IS NOT NULL THEN pv.VALUE_NUMERIC END)),  -- 20 Formatted result
+    MAX(pv.LAST_UPDATED),                                                            -- 21 Result entered
+    cs.NAME,                                                                         -- 22 Collaboration Space
+    'EQUIPMENT',                                                                     -- 23 Result Source
+    MAX(uom.description),                                                            -- 24 UOM
+    (SELECT MAX(CASE WHEN pee2.ITEM_STATES NOT LIKE '%\_%' ESCAPE '\'               -- 25 Item States (Debug)
+                     THEN pee2.ITEM_STATES END)
      FROM hub_owner.PEX_PROC_ELEM_EXEC pee2
      WHERE pee2.PARENT_ID = pe.ID
        AND pee2.ITEM_STATES IS NOT NULL
-    )
+    ),
+    rp.tp_project_plan                                                               -- 26 Task Plan Project Plan
 FROM hub_owner.PEX_PROC_EXEC pe
 JOIN hub_owner.REQ_TASK rt
      ON rt.WORK_ITEM LIKE '%' || LOWER(
@@ -275,13 +304,13 @@ WHERE s.SAMPLE_ID IS NOT NULL
   AND ms.SAMPLE_ID != 'planned'
   AND pv.VALUE_STRING != 'sample'
 GROUP BY
-    s.NAME, s.SAMPLE_ID, rp.tp_project_plan,
+    s.NAME, s.SAMPLE_ID, s.LIFE_CYCLE_STATE,
     ms.SAMPLE_ID, sp.sampling_point,
     sp.sampling_point_description, sp.line,
     usr.NAME, sp.product_code, sp.product_description,
     sp.cig_product_code, sp.cig_product_description,
     sp.spec_group, proj.NAME, runset.RUNSET_ID,
     rt.LIFE_CYCLE_STATE, cs.NAME, peep.ID,
-    pe.ID, meas_s.ROW_INDEX
+    pe.ID, meas_s.ROW_INDEX, rp.tp_project_plan
 HAVING MAX(CASE WHEN pv.VALUE_NUMERIC IS NOT NULL
                 THEN pv.VALUE_NUMERIC END) IS NOT NULL;
