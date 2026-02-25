@@ -455,9 +455,9 @@ runset_properties AS (
 SELECT
     s.NAME as "Sample Name",
     s.SAMPLE_ID as "Sample ID",
-    (SELECT CASE MAX(SUBSTR(pee2.ITEM_STATES, (pv.ITEM_INDEX * 2) + 1, 2))
-                 WHEN 'XX' THEN 'abandoned'
-                 WHEN 'DD' THEN 'completed'
+    (SELECT CASE
+                 WHEN MAX(SUBSTR(pee2.ITEM_STATES, pv.ITEM_INDEX + 1, 1)) = 'X' THEN 'abandoned'
+                 WHEN MAX(SUBSTR(pee2.ITEM_STATES, pv.ITEM_INDEX + 1, 1)) = 'D' THEN 'completed'
                  ELSE s.LIFE_CYCLE_STATE
             END
      FROM hub_owner.PEX_PROC_EXEC pe2
@@ -538,9 +538,9 @@ UNION ALL
 SELECT
     s.NAME,
     s.SAMPLE_ID,
-    CASE MAX(SUBSTR(pee.ITEM_STATES, (meas_s.ROW_INDEX * 2) + 1, 2))
-        WHEN 'XX' THEN 'abandoned'
-        WHEN 'DD' THEN 'completed'
+    CASE
+        WHEN MAX(SUBSTR(pee.ITEM_STATES, meas_s.ROW_INDEX + 1, 1)) = 'X' THEN 'abandoned'
+        WHEN MAX(SUBSTR(pee.ITEM_STATES, meas_s.ROW_INDEX + 1, 1)) = 'D' THEN 'completed'
         ELSE MAX(s.LIFE_CYCLE_STATE)
     END,
     ms.SAMPLE_ID,
@@ -624,7 +624,7 @@ WHERE s.SAMPLE_ID IS NOT NULL
   AND ms.SAMPLE_ID != 'planned'
   AND pv.VALUE_STRING != 'sample'
 GROUP BY
-    s.NAME, s.SAMPLE_ID, s.LIFE_CYCLE_STATE, rp.tp_project_plan,
+    s.NAME, s.SAMPLE_ID, rp.tp_project_plan,
     ms.SAMPLE_ID, sp.sampling_point,
     sp.sampling_point_description, sp.line,
     usr.NAME, sp.product_code, sp.product_description,
