@@ -438,7 +438,6 @@ runset_properties AS (
     AND pv.string_value IS NOT NULL
 
 )
-)
 
 -- =========================
 -- MANUAL TEST RESULTS
