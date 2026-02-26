@@ -1,8 +1,8 @@
 -- Diagnostic 2: Find what ITEM_INDEX holds 150.0099 for S000489,
 -- and what REGEXP_COUNT computes as its position in SAMPLE_LIST.
 
--- PART A: All pv rows for the ov_meter_reading peep in this PE,
--- regardless of ITEM_INDEX — shows every reading stored and at which index.
+-- PART A: All numeric pv rows for ov_meter_reading (SOURCE_POSITION=4) in TP047's PE.
+-- Shows every reading stored and at which ITEM_INDEX.
 SELECT
     'PART_A_ALL_PV_ROWS'        AS section,
     pv.ITEM_INDEX,
@@ -24,13 +24,12 @@ JOIN hub_owner.REQ_TASK rt
             SUBSTR(RAWTOHEX(pe.ID),21,12)) || '%'
     AND rt.RUNSET_ID = (SELECT ID FROM hub_owner.REQ_RUNSET WHERE RUNSET_ID = 'TP047')
 WHERE pv.VALUE_NUMERIC IS NOT NULL
-  AND peep.SOURCE_POSITION = 4  -- ov_meter_reading position
-ORDER BY pv.ITEM_INDEX
+  AND peep.SOURCE_POSITION = 4
 
 UNION ALL
 
--- PART B: What REGEXP_COUNT computes as the 0-based position for S000483 and S000489
--- in rt.SAMPLE_LIST — this is what pv.ITEM_INDEX should equal after the fix.
+-- PART B: What REGEXP_COUNT computes as the 0-based position for S000483/S000489
+-- in rt.SAMPLE_LIST — this is what the fixed query passes as pv.ITEM_INDEX.
 SELECT
     'PART_B_SAMPLE_POSITION'    AS section,
     REGEXP_COUNT(
@@ -52,4 +51,4 @@ JOIN hub_owner.REQ_TASK rt
 JOIN hub_owner.SAM_SAMPLE s
      ON INSTR(','||rt.SAMPLE_LIST||',', ','||s.SAMPLE_ID||',') > 0
     AND s.SAMPLE_ID IN ('S000483', 'S000489')
-ORDER BY 2;
+ORDER BY section, item_index;
