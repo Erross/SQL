@@ -72,6 +72,7 @@ runset_properties AS (
   WHERE ci.table_name   = 'req_runset'
     AND p.display_label = 'Project Plan'
     AND pv.string_value IS NOT NULL
+
 )
 
 -- =========================
@@ -107,12 +108,9 @@ SELECT
     s.NAME                      AS "Sample Name",
     s.SAMPLE_ID                 AS "Sample ID",
     -- Sample Status: scan ALL pee rows for this PEX_PROC_EXEC.
-    -- If ANY row has X at the sample's absolute batch position → abandoned.
-    -- If ANY row has D (and no X) → completed.
-    -- SOURCE_POSITION of the acceptance row varies by instrument type (e.g. 0 for TP064, 6 for TP102),
-    -- so we cannot filter to a specific SP. X only appears in the acceptance row, never in data
-    -- collection rows (which are always all-D), so scanning all rows is safe.
-    -- Absolute position = count of co-run samples with smaller SAMPLE_ID + 1.
+    -- X in ANY row at this sample's absolute batch position (= COUNT of co-run
+    -- samples with smaller SAMPLE_ID + 1) → abandoned. D (no X) → completed.
+    -- SOURCE_POSITION of the acceptance row varies by instrument, so no SP filter.
     (SELECT CASE
                 WHEN MAX(CASE WHEN
                          UPPER(SUBSTR(pee2.ITEM_STATES,
@@ -229,10 +227,8 @@ UNION ALL
 SELECT
     s.NAME,                                                                          -- 1  Sample Name
     s.SAMPLE_ID,                                                                     -- 2  Sample ID
-    -- Sample Status: same SAMPLE_ID-ordering approach as manual section.
-    -- meas_s.ROW_INDEX is NOT reliable as an absolute batch position in ITEM_STATES
-    -- (it is the index within the equipment measurement set, which differs from the
-    -- sample's position in the shared PEX batch). Use COUNT(smaller SAMPLE_IDs)+1 instead.
+    -- Sample Status: identical subquery to manual section.
+    -- rt and s are both in scope here, so correlation is exactly the same.
     (SELECT CASE                                                                     -- 3  Sample Status
                 WHEN MAX(CASE WHEN
                          UPPER(SUBSTR(pee2.ITEM_STATES,
@@ -241,9 +237,9 @@ SELECT
                               JOIN hub_owner.SAM_SAMPLE s2
                                    ON INSTR(','||rt2.SAMPLE_LIST||',', ','||s2.SAMPLE_ID||',') > 0
                               WHERE rt2.WORK_ITEM LIKE '%' || LOWER(
-                                          SUBSTR(RAWTOHEX(pe.ID),1,8)||'-'||SUBSTR(RAWTOHEX(pe.ID),9,4)||'-'||
-                                          SUBSTR(RAWTOHEX(pe.ID),13,4)||'-'||SUBSTR(RAWTOHEX(pe.ID),17,4)||'-'||
-                                          SUBSTR(RAWTOHEX(pe.ID),21,12)) || '%'
+                                          SUBSTR(RAWTOHEX(pe2.ID),1,8)||'-'||SUBSTR(RAWTOHEX(pe2.ID),9,4)||'-'||
+                                          SUBSTR(RAWTOHEX(pe2.ID),13,4)||'-'||SUBSTR(RAWTOHEX(pe2.ID),17,4)||'-'||
+                                          SUBSTR(RAWTOHEX(pe2.ID),21,12)) || '%'
                                 AND s2.SAMPLE_ID < s.SAMPLE_ID),
                              1)) = 'X' THEN 1 END) = 1 THEN 'abandoned'
                 WHEN MAX(CASE WHEN
@@ -253,15 +249,19 @@ SELECT
                               JOIN hub_owner.SAM_SAMPLE s2
                                    ON INSTR(','||rt2.SAMPLE_LIST||',', ','||s2.SAMPLE_ID||',') > 0
                               WHERE rt2.WORK_ITEM LIKE '%' || LOWER(
-                                          SUBSTR(RAWTOHEX(pe.ID),1,8)||'-'||SUBSTR(RAWTOHEX(pe.ID),9,4)||'-'||
-                                          SUBSTR(RAWTOHEX(pe.ID),13,4)||'-'||SUBSTR(RAWTOHEX(pe.ID),17,4)||'-'||
-                                          SUBSTR(RAWTOHEX(pe.ID),21,12)) || '%'
+                                          SUBSTR(RAWTOHEX(pe2.ID),1,8)||'-'||SUBSTR(RAWTOHEX(pe2.ID),9,4)||'-'||
+                                          SUBSTR(RAWTOHEX(pe2.ID),13,4)||'-'||SUBSTR(RAWTOHEX(pe2.ID),17,4)||'-'||
+                                          SUBSTR(RAWTOHEX(pe2.ID),21,12)) || '%'
                                 AND s2.SAMPLE_ID < s.SAMPLE_ID),
                              1)) = 'D' THEN 1 END) = 1 THEN 'completed'
                 ELSE s.LIFE_CYCLE_STATE
             END
-     FROM hub_owner.PEX_PROC_ELEM_EXEC pee2
-     WHERE pee2.PARENT_ID = pe.ID
+     FROM hub_owner.PEX_PROC_EXEC pe2
+     JOIN hub_owner.PEX_PROC_ELEM_EXEC pee2 ON pee2.PARENT_ID = pe2.ID
+     WHERE rt.WORK_ITEM LIKE '%' || LOWER(
+                SUBSTR(RAWTOHEX(pe2.ID),1,8)||'-'||SUBSTR(RAWTOHEX(pe2.ID),9,4)||'-'||
+                SUBSTR(RAWTOHEX(pe2.ID),13,4)||'-'||SUBSTR(RAWTOHEX(pe2.ID),17,4)||'-'||
+                SUBSTR(RAWTOHEX(pe2.ID),21,12)) || '%'
        AND pee2.ITEM_STATES IS NOT NULL
     ),
     ms.SAMPLE_ID,                                                                    -- 4  Master Sample ID
