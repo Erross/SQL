@@ -361,4 +361,4 @@ GROUP BY
     rt.LIFE_CYCLE_STATE, rt.WORK_ITEM, rt.SAMPLE_LIST, cs.NAME, peep.ID,
     pe.ID, meas_s.ROW_INDEX, rp.tp_project_plan
 HAVING MAX(CASE WHEN pv.VALUE_NUMERIC IS NOT NULL
-                THEN pv.VALUE_NUMERIC END) IS NOT NULL;
+                THEN pv.VALUE_NUMERIC END) IS NOT NULL

@@ -1,0 +1,43 @@
+-- Diagnostic: S000483 vs S000489 equipment result investigation
+-- Shows exactly what meas_s, pv, and peep rows each sample resolves to,
+-- so we can see why their results collapse to the same value.
+
+SELECT
+    s.SAMPLE_ID,
+    meas_s.ROW_INDEX,
+    meas_s.SAMPLE_ID          AS meas_s_sample_id_col,   -- the varchar "master" field
+    RAWTOHEX(meas_s.MAPPED_SAMPLE_ID) AS mapped_sample_id_hex,
+    RAWTOHEX(s.ID)            AS sam_sample_id_hex,       -- should match mapped_sample_id_hex
+    RAWTOHEX(peep.ID)         AS peep_id,
+    peep.SOURCE_POSITION,
+    pv.ITEM_INDEX,
+    pv.VALUE_STRING,
+    pv.VALUE_NUMERIC,
+    RAWTOHEX(pe.ID)           AS pe_id,
+    RAWTOHEX(pee.ID)          AS pee_id
+FROM hub_owner.PEX_PROC_EXEC pe
+JOIN hub_owner.PEX_PROC_ELEM_EXEC pee
+     ON pee.PARENT_ID = pe.ID
+JOIN hub_owner.RES_RETRIEVAL_CONTEXT ctx
+     ON ctx.CONTEXT =
+        'urn:pexelement:' ||
+        LOWER(
+            SUBSTR(RAWTOHEX(pee.ID),1,8)||'-'||
+            SUBSTR(RAWTOHEX(pee.ID),9,4)||'-'||
+            SUBSTR(RAWTOHEX(pee.ID),13,4)||'-'||
+            SUBSTR(RAWTOHEX(pee.ID),17,4)||'-'||
+            SUBSTR(RAWTOHEX(pee.ID),21,12)
+        )
+JOIN hub_owner.RES_MEASUREMENTSAMPLE meas_s
+     ON meas_s.CONTEXT_ID = ctx.ID
+JOIN hub_owner.RES_MEASUREMENT m
+     ON m.ID = meas_s.MEASUREMENT_ID
+JOIN hub_owner.SAM_SAMPLE s
+     ON s.ID = meas_s.MAPPED_SAMPLE_ID
+JOIN hub_owner.PEX_PROC_ELEM_EXEC_PARAM peep
+     ON peep.PARENT_ID = pee.ID
+JOIN hub_owner.COR_PARAMETER_VALUE pv
+     ON pv.PARENT_IDENTITY = peep.ID
+    AND pv.ITEM_INDEX = meas_s.ROW_INDEX
+WHERE s.SAMPLE_ID IN ('S000483', 'S000489')
+ORDER BY s.SAMPLE_ID, peep.SOURCE_POSITION, meas_s.ROW_INDEX;
