@@ -316,18 +316,6 @@ JOIN hub_owner.SAM_SAMPLE s
      ON s.ID = meas_s.MAPPED_SAMPLE_ID
 JOIN hub_owner.PEX_PROC_ELEM_EXEC_PARAM peep
      ON peep.PARENT_ID = pee.ID
-JOIN hub_owner.COR_PARAMETER_VALUE pv
-     ON pv.PARENT_IDENTITY = peep.ID
-    AND pv.ITEM_INDEX = (
-            -- 0-based position of this sample in rt.SAMPLE_LIST (list order, not sort order).
-            -- Counts commas in SAMPLE_LIST up to and including this sample's entry.
-            -- This correctly distinguishes samples that share the same meas_s.ROW_INDEX.
-            REGEXP_COUNT(
-                SUBSTR(','||rt.SAMPLE_LIST, 1,
-                       INSTR(','||rt.SAMPLE_LIST, ','||s.SAMPLE_ID)),
-                ','
-            ) - 1
-        )
 JOIN hub_owner.REQ_TASK rt
      ON rt.WORK_ITEM LIKE '%' || LOWER(
             SUBSTR(RAWTOHEX(pe.ID),1,8)  ||'-'||
@@ -337,6 +325,18 @@ JOIN hub_owner.REQ_TASK rt
             SUBSTR(RAWTOHEX(pe.ID),21,12)
         ) || '%'
     AND INSTR(','||rt.SAMPLE_LIST||',', ','||s.SAMPLE_ID||',') > 0
+JOIN hub_owner.COR_PARAMETER_VALUE pv
+     ON pv.PARENT_IDENTITY = peep.ID
+    AND pv.ITEM_INDEX = (
+            -- 0-based position of this sample in rt.SAMPLE_LIST.
+            -- Counts commas before this sample's entry → its 0-based index.
+            -- Fixes samples sharing the same meas_s.ROW_INDEX across different runs.
+            REGEXP_COUNT(
+                SUBSTR(','||rt.SAMPLE_LIST, 1,
+                       INSTR(','||rt.SAMPLE_LIST, ','||s.SAMPLE_ID)),
+                ','
+            ) - 1
+        )
 LEFT JOIN hub_owner.SAM_SAMPLE ms
      ON s.MASTER_SAMPLE_ID = ms.ID
 LEFT JOIN hub_owner.SEC_USER usr
