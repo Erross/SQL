@@ -73,6 +73,38 @@ runset_properties AS (
     AND p.display_label = 'Project Plan'
     AND pv.string_value IS NOT NULL
 
+),
+sample_status AS (
+  -- Computes abandoned/completed per SAMPLE_ID for use by the equipment section.
+  -- Uses ROW_NUMBER() to get each sample's 1-based absolute batch position
+  -- (ordered by SAMPLE_ID ASC within the PEX_PROC_EXEC) - identical result to
+  -- the COUNT(smaller SAMPLE_IDs)+1 approach but valid inside a WITH clause.
+  -- No correlated subqueries, which Oracle prohibits inside CTE definitions.
+  SELECT
+      rn.SAMPLE_ID,
+      CASE
+          WHEN MAX(CASE WHEN UPPER(SUBSTR(pee.ITEM_STATES, rn.pos, 1)) = 'X' THEN 1 END) = 1 THEN 'abandoned'
+          WHEN MAX(CASE WHEN UPPER(SUBSTR(pee.ITEM_STATES, rn.pos, 1)) = 'D' THEN 1 END) = 1 THEN 'completed'
+          ELSE NULL
+      END AS sample_status
+  FROM (
+      SELECT
+          pe.ID   AS pe_id,
+          s.SAMPLE_ID,
+          ROW_NUMBER() OVER (PARTITION BY pe.ID ORDER BY s.SAMPLE_ID) AS pos
+      FROM hub_owner.PEX_PROC_EXEC pe
+      JOIN hub_owner.REQ_TASK rt
+           ON rt.WORK_ITEM LIKE '%' || LOWER(
+                  SUBSTR(RAWTOHEX(pe.ID),1,8)||'-'||SUBSTR(RAWTOHEX(pe.ID),9,4)||'-'||
+                  SUBSTR(RAWTOHEX(pe.ID),13,4)||'-'||SUBSTR(RAWTOHEX(pe.ID),17,4)||'-'||
+                  SUBSTR(RAWTOHEX(pe.ID),21,12)) || '%'
+           AND rt.LIFE_CYCLE_STATE IN ('released', 'completed')
+      JOIN hub_owner.SAM_SAMPLE s
+           ON INSTR(','||rt.SAMPLE_LIST||',', ','||s.SAMPLE_ID||',') > 0
+  ) rn
+  JOIN hub_owner.PEX_PROC_ELEM_EXEC pee ON pee.PARENT_ID = rn.pe_id
+  WHERE pee.ITEM_STATES IS NOT NULL
+  GROUP BY rn.SAMPLE_ID
 )
 
 -- =========================
@@ -227,43 +259,7 @@ UNION ALL
 SELECT
     s.NAME,                                                                          -- 1  Sample Name
     s.SAMPLE_ID,                                                                     -- 2  Sample ID
-    -- Sample Status: identical subquery to manual section.
-    -- rt and s are both in scope here, so correlation is exactly the same.
-    (SELECT CASE                                                                     -- 3  Sample Status
-                WHEN MAX(CASE WHEN
-                         UPPER(SUBSTR(pee2.ITEM_STATES,
-                             (SELECT COUNT(*) + 1
-                              FROM hub_owner.REQ_TASK rt2
-                              JOIN hub_owner.SAM_SAMPLE s2
-                                   ON INSTR(','||rt2.SAMPLE_LIST||',', ','||s2.SAMPLE_ID||',') > 0
-                              WHERE rt2.WORK_ITEM LIKE '%' || LOWER(
-                                          SUBSTR(RAWTOHEX(pe2.ID),1,8)||'-'||SUBSTR(RAWTOHEX(pe2.ID),9,4)||'-'||
-                                          SUBSTR(RAWTOHEX(pe2.ID),13,4)||'-'||SUBSTR(RAWTOHEX(pe2.ID),17,4)||'-'||
-                                          SUBSTR(RAWTOHEX(pe2.ID),21,12)) || '%'
-                                AND s2.SAMPLE_ID < s.SAMPLE_ID),
-                             1)) = 'X' THEN 1 END) = 1 THEN 'abandoned'
-                WHEN MAX(CASE WHEN
-                         UPPER(SUBSTR(pee2.ITEM_STATES,
-                             (SELECT COUNT(*) + 1
-                              FROM hub_owner.REQ_TASK rt2
-                              JOIN hub_owner.SAM_SAMPLE s2
-                                   ON INSTR(','||rt2.SAMPLE_LIST||',', ','||s2.SAMPLE_ID||',') > 0
-                              WHERE rt2.WORK_ITEM LIKE '%' || LOWER(
-                                          SUBSTR(RAWTOHEX(pe2.ID),1,8)||'-'||SUBSTR(RAWTOHEX(pe2.ID),9,4)||'-'||
-                                          SUBSTR(RAWTOHEX(pe2.ID),13,4)||'-'||SUBSTR(RAWTOHEX(pe2.ID),17,4)||'-'||
-                                          SUBSTR(RAWTOHEX(pe2.ID),21,12)) || '%'
-                                AND s2.SAMPLE_ID < s.SAMPLE_ID),
-                             1)) = 'D' THEN 1 END) = 1 THEN 'completed'
-                ELSE s.LIFE_CYCLE_STATE
-            END
-     FROM hub_owner.PEX_PROC_EXEC pe2
-     JOIN hub_owner.PEX_PROC_ELEM_EXEC pee2 ON pee2.PARENT_ID = pe2.ID
-     WHERE rt.WORK_ITEM LIKE '%' || LOWER(
-                SUBSTR(RAWTOHEX(pe2.ID),1,8)||'-'||SUBSTR(RAWTOHEX(pe2.ID),9,4)||'-'||
-                SUBSTR(RAWTOHEX(pe2.ID),13,4)||'-'||SUBSTR(RAWTOHEX(pe2.ID),17,4)||'-'||
-                SUBSTR(RAWTOHEX(pe2.ID),21,12)) || '%'
-       AND pee2.ITEM_STATES IS NOT NULL
-    ),
+    COALESCE(ss.sample_status, s.LIFE_CYCLE_STATE),                               -- 3  Sample Status
     ms.SAMPLE_ID,                                                                    -- 4  Master Sample ID
     sp.sampling_point,                                                               -- 5  Sampling point
     TRIM(REGEXP_REPLACE(                                                             -- 6  Sampling point description
@@ -345,6 +341,8 @@ LEFT JOIN hub_owner.SEC_COLLAB_SPACE cs
      ON cs.ID = coi_sample.COLLABORATIVE_SPACE_ID
 LEFT JOIN hub_owner.COR_UNIT uom
      ON pv.UNIT = uom.ID
+LEFT JOIN sample_status ss
+     ON ss.SAMPLE_ID = s.SAMPLE_ID
 WHERE s.SAMPLE_ID IS NOT NULL
   AND rt.LIFE_CYCLE_STATE IN ('released', 'completed')
   AND cs.ID = '5FD74EE88C024C2EB908BCE0E176B0E8'
