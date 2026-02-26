@@ -318,7 +318,16 @@ JOIN hub_owner.PEX_PROC_ELEM_EXEC_PARAM peep
      ON peep.PARENT_ID = pee.ID
 JOIN hub_owner.COR_PARAMETER_VALUE pv
      ON pv.PARENT_IDENTITY = peep.ID
-     AND pv.ITEM_INDEX = meas_s.ROW_INDEX
+    AND pv.ITEM_INDEX = (
+            -- 0-based position of this sample in rt.SAMPLE_LIST (list order, not sort order).
+            -- Counts commas in SAMPLE_LIST up to and including this sample's entry.
+            -- This correctly distinguishes samples that share the same meas_s.ROW_INDEX.
+            REGEXP_COUNT(
+                SUBSTR(','||rt.SAMPLE_LIST, 1,
+                       INSTR(','||rt.SAMPLE_LIST, ','||s.SAMPLE_ID)),
+                ','
+            ) - 1
+        )
 JOIN hub_owner.REQ_TASK rt
      ON rt.WORK_ITEM LIKE '%' || LOWER(
             SUBSTR(RAWTOHEX(pe.ID),1,8)  ||'-'||
@@ -359,6 +368,6 @@ GROUP BY
     sp.cig_product_code, sp.cig_product_description,
     sp.spec_group, proj.NAME, runset.RUNSET_ID,
     rt.LIFE_CYCLE_STATE, rt.WORK_ITEM, rt.SAMPLE_LIST, cs.NAME, peep.ID,
-    pe.ID, meas_s.ROW_INDEX, rp.tp_project_plan
+    pe.ID, rp.tp_project_plan
 HAVING MAX(CASE WHEN pv.VALUE_NUMERIC IS NOT NULL
-                THEN pv.VALUE_NUMERIC END) IS NOT NULL
+                THEN pv.VALUE_NUMERIC END) IS NOT NULL;
