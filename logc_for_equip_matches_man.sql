@@ -660,14 +660,6 @@ SELECT
     ),
     rp.tp_project_plan                                                               -- 26 Task Plan Project Plan
 FROM hub_owner.PEX_PROC_EXEC pe
-JOIN hub_owner.REQ_TASK rt
-     ON rt.WORK_ITEM LIKE '%' || LOWER(
-            SUBSTR(RAWTOHEX(pe.ID),1,8)  ||'-'||
-            SUBSTR(RAWTOHEX(pe.ID),9,4)  ||'-'||
-            SUBSTR(RAWTOHEX(pe.ID),13,4) ||'-'||
-            SUBSTR(RAWTOHEX(pe.ID),17,4) ||'-'||
-            SUBSTR(RAWTOHEX(pe.ID),21,12)
-        ) || '%'
 JOIN hub_owner.PEX_PROC_ELEM_EXEC pee
      ON pee.PARENT_ID = pe.ID
 JOIN hub_owner.RES_RETRIEVAL_CONTEXT ctx
@@ -691,6 +683,15 @@ JOIN hub_owner.PEX_PROC_ELEM_EXEC_PARAM peep
 JOIN hub_owner.COR_PARAMETER_VALUE pv
      ON pv.PARENT_IDENTITY = peep.ID
      AND pv.ITEM_INDEX = meas_s.ROW_INDEX
+JOIN hub_owner.REQ_TASK rt
+     ON rt.WORK_ITEM LIKE '%' || LOWER(
+            SUBSTR(RAWTOHEX(pe.ID),1,8)  ||'-'||
+            SUBSTR(RAWTOHEX(pe.ID),9,4)  ||'-'||
+            SUBSTR(RAWTOHEX(pe.ID),13,4) ||'-'||
+            SUBSTR(RAWTOHEX(pe.ID),17,4) ||'-'||
+            SUBSTR(RAWTOHEX(pe.ID),21,12)
+        ) || '%'
+    AND INSTR(','||rt.SAMPLE_LIST||',', ','||s.SAMPLE_ID||',') > 0
 LEFT JOIN hub_owner.SAM_SAMPLE ms
      ON s.MASTER_SAMPLE_ID = ms.ID
 LEFT JOIN hub_owner.SEC_USER usr
