@@ -98,3 +98,20 @@ WHERE s.SAMPLE_ID IN ('S003025','S002814','S003345','S002830','S003342',
                        'S002943','S003329','S002833','S002959','S002940',
                        'S003326','S002817','S002956')
 ORDER BY s.SAMPLE_ID;
+
+-- Step 2: Can we reach PEE via the context URN?
+SELECT 
+    s.SAMPLE_ID,
+    meas_s.ROW_INDEX,
+    ctx.CONTEXT,
+    pee.ID as PEE_ID
+FROM hub_owner.SAM_SAMPLE s
+JOIN hub_owner.RES_MEASUREMENTSAMPLE meas_s ON meas_s.MAPPED_SAMPLE_ID = s.ID
+JOIN hub_owner.RES_RETRIEVAL_CONTEXT ctx ON ctx.ID = meas_s.CONTEXT_ID
+LEFT JOIN hub_owner.PEX_PROC_ELEM_EXEC pee 
+     ON ctx.CONTEXT = 'urn:pexelement:' ||
+        LOWER(SUBSTR(RAWTOHEX(pee.ID),1,8)||'-'||SUBSTR(RAWTOHEX(pee.ID),9,4)||'-'||
+              SUBSTR(RAWTOHEX(pee.ID),13,4)||'-'||SUBSTR(RAWTOHEX(pee.ID),17,4)||'-'||
+              SUBSTR(RAWTOHEX(pee.ID),21,12))
+WHERE s.SAMPLE_ID IN ('S003025','S002814','S003345')
+ORDER BY s.SAMPLE_ID;
