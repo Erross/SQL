@@ -313,3 +313,24 @@ WHERE ms2.CONTEXT_ID = (
     AND ROWNUM = 1
 )
 ORDER BY ms2.MEASUREMENT_ID, ms2.ROW_INDEX;
+
+--all
+
+SELECT 
+    peep.SOURCE_POSITION,
+    COUNT(*) as PV_COUNT,
+    MIN(pv.ITEM_INDEX) as MIN_IDX,
+    MAX(pv.ITEM_INDEX) as MAX_IDX
+FROM hub_owner.SAM_SAMPLE s
+JOIN hub_owner.RES_MEASUREMENTSAMPLE meas_s ON meas_s.MAPPED_SAMPLE_ID = s.ID
+JOIN hub_owner.RES_RETRIEVAL_CONTEXT ctx ON ctx.ID = meas_s.CONTEXT_ID
+JOIN hub_owner.PEX_PROC_ELEM_EXEC pee 
+     ON ctx.CONTEXT = 'urn:pexelement:' ||
+        LOWER(SUBSTR(RAWTOHEX(pee.ID),1,8)||'-'||SUBSTR(RAWTOHEX(pee.ID),9,4)||'-'||
+              SUBSTR(RAWTOHEX(pee.ID),13,4)||'-'||SUBSTR(RAWTOHEX(pee.ID),17,4)||'-'||
+              SUBSTR(RAWTOHEX(pee.ID),21,12))
+JOIN hub_owner.PEX_PROC_ELEM_EXEC_PARAM peep ON peep.PARENT_ID = pee.ID
+JOIN hub_owner.COR_PARAMETER_VALUE pv ON pv.PARENT_IDENTITY = peep.ID
+WHERE s.SAMPLE_ID = 'S002236'
+GROUP BY peep.SOURCE_POSITION
+ORDER BY peep.SOURCE_POSITION;
