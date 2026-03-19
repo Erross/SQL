@@ -162,3 +162,31 @@ LEFT JOIN hub_owner.SAM_SAMPLE ms_master ON s.MASTER_SAMPLE_ID = ms_master.ID
 LEFT JOIN hub_owner.COSPC_OBJECT_IDENTITY coi ON coi.OBJECT_ID = s.ID
 WHERE s.SAMPLE_ID IN ('S002814','S003025','S003345')
 ORDER BY s.SAMPLE_ID, peep.SOURCE_POSITION;
+
+--but why
+
+SELECT 
+    s.SAMPLE_ID,
+    meas_s.ROW_INDEX,
+    (meas_s.ROW_INDEX - (
+        SELECT MIN(ms2.ROW_INDEX)
+        FROM hub_owner.RES_MEASUREMENTSAMPLE ms2
+        WHERE ms2.CONTEXT_ID = meas_s.CONTEXT_ID
+    )) as CALC_ITEM_INDEX,
+    peep.SOURCE_POSITION,
+    pv.ITEM_INDEX,
+    pv.VALUE_NUMERIC,
+    pv.VALUE_STRING
+FROM hub_owner.SAM_SAMPLE s
+JOIN hub_owner.RES_MEASUREMENTSAMPLE meas_s ON meas_s.MAPPED_SAMPLE_ID = s.ID
+JOIN hub_owner.RES_RETRIEVAL_CONTEXT ctx ON ctx.ID = meas_s.CONTEXT_ID
+JOIN hub_owner.PEX_PROC_ELEM_EXEC pee 
+     ON ctx.CONTEXT = 'urn:pexelement:' ||
+        LOWER(SUBSTR(RAWTOHEX(pee.ID),1,8)||'-'||SUBSTR(RAWTOHEX(pee.ID),9,4)||'-'||
+              SUBSTR(RAWTOHEX(pee.ID),13,4)||'-'||SUBSTR(RAWTOHEX(pee.ID),17,4)||'-'||
+              SUBSTR(RAWTOHEX(pee.ID),21,12))
+JOIN hub_owner.PEX_PROC_ELEM_EXEC_PARAM peep ON peep.PARENT_ID = pee.ID
+JOIN hub_owner.COR_PARAMETER_VALUE pv ON pv.PARENT_IDENTITY = peep.ID
+WHERE s.SAMPLE_ID = 'S002814'
+  AND peep.SOURCE_POSITION = 4
+ORDER BY pv.ITEM_INDEX;
