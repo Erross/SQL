@@ -130,6 +130,7 @@ SELECT DISTINCT
     sp.spec_group               AS "Spec_Group",
     proj.NAME                   AS "Task Plan Project",
     runset.RUNSET_ID            AS "Task Plan ID",
+    runset.DATE_CREATED         AS "Task Plan Creation Date",
     rt.LIFE_CYCLE_STATE         AS "Task Status",
     p.DISPLAY_NAME              AS "Characteristic",
     pv.INTERPRETATION           AS "Compose Details",
@@ -245,6 +246,7 @@ SELECT
     sp.spec_group,
     proj.NAME,
     runset.RUNSET_ID,
+    runset.DATE_CREATED,
     rt.LIFE_CYCLE_STATE,
     MAX(CASE WHEN pv.VALUE_STRING IS NOT NULL THEN pv.VALUE_STRING END),
     NULL,
@@ -327,7 +329,7 @@ GROUP BY
     sp.sampling_point_description, sp.line,
     usr.NAME, sp.product_code, sp.product_description,
     sp.cig_product_code, sp.cig_product_description,
-    sp.spec_group, proj.NAME, runset.RUNSET_ID,
+    sp.spec_group, proj.NAME, runset.RUNSET_ID, runset.DATE_CREATED,
     rt.LIFE_CYCLE_STATE, rt.WORK_ITEM, rt.SAMPLE_LIST, cs.NAME, peep.ID,
     pe.ID, rp.tp_project_plan
 HAVING MAX(CASE WHEN pv.VALUE_NUMERIC IS NOT NULL
