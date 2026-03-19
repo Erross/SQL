@@ -211,3 +211,24 @@ JOIN hub_owner.RES_MEASUREMENTSAMPLE meas_s ON meas_s.MAPPED_SAMPLE_ID = s.ID
 WHERE s.SAMPLE_ID IN ('S002814','S003025','S003345',
                        'S001033','S001035')
 ORDER BY s.SAMPLE_ID;
+
+--count
+
+SELECT 
+    s.SAMPLE_ID,
+    meas_s.ROW_INDEX,
+    (SELECT COUNT(*)
+     FROM hub_owner.RES_MEASUREMENTSAMPLE ms2
+     WHERE ms2.CONTEXT_ID = meas_s.CONTEXT_ID
+       AND ms2.ROW_INDEX < meas_s.ROW_INDEX
+    ) as CALC_ITEM_INDEX_COUNT,
+    meas_s.ROW_INDEX - (
+        SELECT MIN(ms2.ROW_INDEX)
+        FROM hub_owner.RES_MEASUREMENTSAMPLE ms2
+        WHERE ms2.CONTEXT_ID = meas_s.CONTEXT_ID
+    ) as CALC_ITEM_INDEX_MIN
+FROM hub_owner.SAM_SAMPLE s
+JOIN hub_owner.RES_MEASUREMENTSAMPLE meas_s ON meas_s.MAPPED_SAMPLE_ID = s.ID
+WHERE s.SAMPLE_ID IN ('S002814','S003025','S003345',
+                       'S001033','S001035')
+ORDER BY s.SAMPLE_ID;
