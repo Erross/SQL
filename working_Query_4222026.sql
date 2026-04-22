@@ -74,9 +74,6 @@ runset_properties AS (
     AND pv.string_value IS NOT NULL
 ),
 
-/* =========================================
-   EQUIPMENT FIX CTEs
-   ========================================= */
 equipment_param_defs AS (
     SELECT
         pe.id  AS proc_exec_id,
@@ -205,15 +202,8 @@ equipment_rows AS (
                         'ov_meter_reading_[%]'
                  )
                  THEN unit_id
-            END) AS result_unit_id,
+            END) AS result_unit_id
 
-        MAX(CASE WHEN field_name IN (
-                        'sampling_point_time',
-                        'sampling point time',
-                        'sampling point time *'
-                 )
-                 THEN COALESCE(value_string, value_text, value_numeric_text, TO_CHAR(value_numeric))
-            END) AS sampling_point_time
     FROM equipment_named
     GROUP BY
         proc_exec_id,
@@ -339,7 +329,7 @@ WHERE pv.VALUE_KEY = 'A'
 UNION ALL
 
 -- =========================
--- EQUIPMENT MEASUREMENT RESULTS (FIXED)
+-- EQUIPMENT MEASUREMENT RESULTS (FIXED / UNION-ALIGNED)
 -- =========================
 SELECT DISTINCT
     s.NAME                      AS "Sample Name",
@@ -404,6 +394,16 @@ SELECT DISTINCT
     cs.NAME                     AS "Collaboration Space",
     'EQUIPMENT'                 AS "Result Source",
     uom.description             AS "UOM",
+    (SELECT MAX(pee2.SOURCE_POSITION||':'||pee2.ITEM_STATES)
+     FROM hub_owner.PEX_PROC_EXEC pe2
+     JOIN hub_owner.PEX_PROC_ELEM_EXEC pee2 ON pee2.PARENT_ID = pe2.ID
+     WHERE rt.WORK_ITEM LIKE '%' || LOWER(
+                SUBSTR(RAWTOHEX(pe2.ID),1,8)||'-'||SUBSTR(RAWTOHEX(pe2.ID),9,4)||'-'||
+                SUBSTR(RAWTOHEX(pe2.ID),13,4)||'-'||SUBSTR(RAWTOHEX(pe2.ID),17,4)||'-'||
+                SUBSTR(RAWTOHEX(pe2.ID),21,12) ) || '%'
+       AND pee2.ITEM_STATES IS NOT NULL
+       AND REGEXP_LIKE(pee2.ITEM_STATES, '[XD]')
+    )                           AS "Item States (Debug)",
     rp.tp_project_plan          AS "Task Plan Project Plan"
 FROM equipment_rows er
 JOIN hub_owner.PEX_PROC_EXEC pe
@@ -437,6 +437,6 @@ LEFT JOIN hub_owner.COR_UNIT uom
   ON uom.ID = er.result_unit_id
 WHERE s.SAMPLE_ID IS NOT NULL
   AND rt.LIFE_CYCLE_STATE IN ('released', 'completed')
-  AND cs.ID = '5FD74EE88C024C2EB908BCE0E176B0E176B0E8'
+  AND cs.ID = '5FD74EE88C024C2EB908BCE0E176B0E8'
   AND ms.SAMPLE_ID != 'planned'
   AND er.result_numeric IS NOT NULL;
