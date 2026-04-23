@@ -220,3 +220,30 @@ LEFT JOIN hub_owner.sec_collab_space cs
   ON cs.id = coi.collaborative_space_id
 WHERE er.packet_sample_id = 'S005460'
 ORDER BY er.proc_exec_id, er.proc_elem_exec_id, er.group_index, er.item_index;  
+
+SELECT
+    pe.id  AS proc_exec_id,
+    pee.id AS proc_elem_exec_id,
+    peep.id AS peep_id,
+    peep.source_position,
+    pv.item_index,
+    NVL(pv.group_index, 1) AS group_index,
+    pv.value_key,
+    pv.value_type,
+    pv.value_string,
+    pv.value_numeric,
+    pv.value_text,
+    pv.value_numeric_text,
+    pv.interpretation,
+    pv.last_updated
+FROM hub_owner.pex_proc_exec pe
+JOIN hub_owner.pex_proc_elem_exec pee
+  ON pee.parent_id = pe.id
+JOIN hub_owner.pex_proc_elem_exec_param peep
+  ON peep.parent_id = pee.id
+JOIN hub_owner.cor_parameter_value pv
+  ON pv.parent_identity = peep.id
+WHERE UPPER(NVL(pv.value_string, '')) LIKE '%S005460%'
+   OR UPPER(NVL(pv.value_text, '')) LIKE '%S005460%'
+   OR UPPER(NVL(pv.value_numeric_text, '')) LIKE '%S005460%'
+ORDER BY pv.last_updated DESC, peep.source_position, pv.item_index;
