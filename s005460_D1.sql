@@ -247,3 +247,42 @@ WHERE UPPER(NVL(pv.value_string, '')) LIKE '%S005460%'
    OR UPPER(NVL(pv.value_text, '')) LIKE '%S005460%'
    OR UPPER(NVL(pv.value_numeric_text, '')) LIKE '%S005460%'
 ORDER BY pv.last_updated DESC, peep.source_position, pv.item_index;
+
+--has any equip?
+
+SELECT
+    s.sample_id,
+    s.name,
+    RAWTOHEX(s.id) AS sample_raw_id_hex,
+    RAWTOHEX(meas_s.id) AS meas_sample_id_hex,
+    meas_s.row_index,
+    RAWTOHEX(meas_s.context_id) AS context_id_hex,
+    RAWTOHEX(meas_s.measurement_id) AS measurement_id_hex,
+    m.record_name,
+    m.record_date,
+    m.measurement_type,
+    m.last_updated AS measurement_last_updated,
+    ctx.context AS retrieval_context,
+    RAWTOHEX(pee.id) AS proc_elem_exec_id_hex,
+    RAWTOHEX(pe.id) AS proc_exec_id_hex
+FROM hub_owner.sam_sample s
+LEFT JOIN hub_owner.res_measurementsample meas_s
+  ON meas_s.mapped_sample_id = s.id
+LEFT JOIN hub_owner.res_measurement m
+  ON m.id = meas_s.measurement_id
+LEFT JOIN hub_owner.res_retrieval_context ctx
+  ON ctx.id = meas_s.context_id
+LEFT JOIN hub_owner.pex_proc_elem_exec pee
+  ON ctx.context =
+     'urn:pexelement:' ||
+     LOWER(
+         SUBSTR(RAWTOHEX(pee.id),1,8)||'-'||
+         SUBSTR(RAWTOHEX(pee.id),9,4)||'-'||
+         SUBSTR(RAWTOHEX(pee.id),13,4)||'-'||
+         SUBSTR(RAWTOHEX(pee.id),17,4)||'-'||
+         SUBSTR(RAWTOHEX(pee.id),21,12)
+     )
+LEFT JOIN hub_owner.pex_proc_exec pe
+  ON pe.id = pee.parent_id
+WHERE s.sample_id = 'S005460'
+ORDER BY m.last_updated DESC, meas_s.row_index;
