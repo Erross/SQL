@@ -22,23 +22,47 @@ sample_properties AS (
   SELECT
     oi.object_id AS sample_raw_id,
     MAX(CASE WHEN p.display_label = 'Sampling Point'
-             THEN COALESCE(pv.string_value,
-                           SUBSTR(TO_CHAR(pv.long_string_value), 1, 4000),
-                           TO_CHAR(pv.number_value))
+             THEN COALESCE(
+                    pv.string_value,
+                    SUBSTR(TO_CHAR(pv.long_string_value), 1, 4000),
+                    TO_CHAR(pv.number_value)
+                  )
         END) AS sampling_point,
     MAX(CASE WHEN p.display_label = 'Sampling Point Description'
-             THEN COALESCE(pv.string_value,
-                           SUBSTR(TO_CHAR(pv.long_string_value), 1, 4000))
+             THEN COALESCE(
+                    pv.string_value,
+                    SUBSTR(TO_CHAR(pv.long_string_value), 1, 4000)
+                  )
         END) AS sampling_point_description,
     MAX(CASE WHEN p.display_label = 'Product Code'
-             THEN COALESCE(pv.string_value,
-                           SUBSTR(TO_CHAR(pv.long_string_value), 1, 4000),
-                           TO_CHAR(pv.number_value))
+             THEN COALESCE(
+                    pv.string_value,
+                    SUBSTR(TO_CHAR(pv.long_string_value), 1, 4000),
+                    TO_CHAR(pv.number_value)
+                  )
         END) AS product_code,
     MAX(CASE WHEN p.display_label = 'Product Description'
-             THEN COALESCE(pv.string_value,
-                           SUBSTR(TO_CHAR(pv.long_string_value), 1, 4000))
-        END) AS product_description
+             THEN COALESCE(
+                    pv.string_value,
+                    SUBSTR(TO_CHAR(pv.long_string_value), 1, 4000)
+                  )
+        END) AS product_description,
+    MAX(CASE WHEN p.display_label = 'Cig Product Code'
+             THEN COALESCE(
+                    pv.string_value,
+                    SUBSTR(TO_CHAR(pv.long_string_value), 1, 4000),
+                    TO_CHAR(pv.number_value)
+                  )
+        END) AS cig_product_code,
+    MAX(CASE WHEN p.display_label = 'Cig Product Description'
+             THEN COALESCE(
+                    pv.string_value,
+                    SUBSTR(TO_CHAR(pv.long_string_value), 1, 4000)
+                  )
+        END) AS cig_product_description,
+    MAX(CASE WHEN p.display_label = 'Spec Group'
+             THEN REGEXP_REPLACE(pv.string_value, '^PK-','')
+        END) AS spec_group
   FROM hub_owner.cor_class_identity ci
   JOIN hub_owner.cor_object_identity oi
     ON oi.class_identity_id = ci.id
@@ -51,17 +75,35 @@ sample_properties AS (
       'Sampling Point',
       'Sampling Point Description',
       'Product Code',
-      'Product Description'
+      'Product Description',
+      'Cig Product Code',
+      'Cig Product Description',
+      'Spec Group'
     )
   GROUP BY oi.object_id
 ),
 
-/* ============================================================
-   EQUIPMENT PARAMETER METADATA / VALUES
-   ============================================================ */
+runset_properties AS (
+  SELECT
+    oi.object_id AS runset_raw_id,
+    ve.name AS tp_project_plan
+  FROM hub_owner.cor_class_identity ci
+  JOIN hub_owner.cor_object_identity oi
+    ON oi.class_identity_id = ci.id
+  JOIN hub_owner.cor_property_value pv
+    ON pv.object_identity_id = oi.id
+  JOIN hub_owner.cor_property p
+    ON p.name = pv.property_id
+  JOIN hub_owner.cor_vocab_entry ve
+    ON RAWTOHEX(ve.id) = UPPER(REPLACE(pv.string_value, '-', ''))
+  WHERE ci.table_name = 'req_runset'
+    AND p.display_label = 'Project Plan'
+    AND pv.string_value IS NOT NULL
+),
+
 equipment_param_defs AS (
   SELECT
-    pe.id  AS proc_exec_id,
+    pe.id AS proc_exec_id,
     pee.id AS proc_elem_exec_id,
     peep.id AS peep_id,
     peep.source_position,
@@ -82,7 +124,7 @@ equipment_param_defs AS (
 
 equipment_param_values AS (
   SELECT
-    pe.id  AS proc_exec_id,
+    pe.id AS proc_exec_id,
     pee.id AS proc_elem_exec_id,
     peep.id AS peep_id,
     peep.source_position,
@@ -153,6 +195,7 @@ equipment_packet_shape AS (
   GROUP BY proc_elem_exec_id
 ),
 
+/* keep dynamic result detection, but remove weight-like fields */
 equipment_result_candidates AS (
   SELECT
     ec.proc_exec_id,
@@ -187,6 +230,15 @@ equipment_result_candidates AS (
       ec.value_numeric_text IS NOT NULL OR
       ec.value_text IS NOT NULL OR
       ec.value_string IS NOT NULL
+    )
+    AND NOT (
+      ec.field_name LIKE '%weight%'
+      OR ec.field_name LIKE '%mass%'
+      OR ec.field_name LIKE '%tare%'
+      OR ec.field_name LIKE '%gross%'
+      OR ec.field_name LIKE '%net_weight%'
+      OR ec.field_name LIKE '%sample_weight%'
+      OR ec.field_name LIKE '%dish_weight%'
     )
 ),
 
@@ -282,7 +334,6 @@ equipment_resolved AS (
     ewc.result_interpretation,
     ewc.result_entered,
     ewc.result_unit_id,
-
     COALESCE(
       s_packet.id,
       s_fb_multi.id,
@@ -326,7 +377,11 @@ manual_results AS (
   SELECT DISTINCT
     s.name AS "Sample Name",
     s.sample_id AS "Sample ID",
-    s.life_cycle_state AS "Sample Status",
+    CASE
+      WHEN tm.task_status = 'completed' THEN 'completed'
+      WHEN tm.task_status = 'released' THEN 'released'
+      ELSE s.life_cycle_state
+    END AS "Sample Status",
     ms.sample_id AS "Master Sample ID",
     sp.sampling_point AS "Sampling point",
     TRIM(REGEXP_REPLACE(
@@ -335,14 +390,20 @@ manual_results AS (
     )) AS "Sampling point description",
     sp.product_code AS "Product Code",
     sp.product_description AS "Product Description",
+    sp.cig_product_code AS "CIG_PRODUCT_CODE",
+    sp.cig_product_description AS "CIG_PRODUCT_DESCRIPTION",
+    sp.spec_group AS "Spec_Group",
+    proj.name AS "Task Plan Project",
     runset.runset_id AS "Task Plan ID",
+    runset.date_created AS "Task Plan Creation Date",
     tm.task_status AS "Task Status",
     p.display_name AS "Characteristic",
     pv.value_string AS "Result",
     pv.value_text AS "Formatted result",
     pv.last_updated AS "Result entered",
     'MANUAL' AS "Result Source",
-    uom.description AS "UOM"
+    uom.description AS "UOM",
+    rp.tp_project_plan AS "Task Plan Project Plan"
   FROM hub_owner.cor_parameter_value pv
   JOIN hub_owner.cor_parameter p
     ON pv.parent_identity = p.id
@@ -354,6 +415,10 @@ manual_results AS (
     ON tm.task_raw_id = rt.id
   LEFT JOIN hub_owner.req_runset runset
     ON rt.runset_id = runset.id
+  LEFT JOIN hub_owner.res_project proj
+    ON runset.project_id = proj.id
+  LEFT JOIN runset_properties rp
+    ON rp.runset_raw_id = runset.id
   LEFT JOIN hub_owner.sam_sample s
     ON s.sample_id = REGEXP_SUBSTR(rt.sample_list, '[^,]+', 1, pv.item_index + 1)
   LEFT JOIN hub_owner.sam_sample ms
@@ -379,7 +444,11 @@ equipment_results AS (
   SELECT DISTINCT
     s.name AS "Sample Name",
     s.sample_id AS "Sample ID",
-    s.life_cycle_state AS "Sample Status",
+    CASE
+      WHEN tm.task_status = 'completed' THEN 'completed'
+      WHEN tm.task_status = 'released' THEN 'released'
+      ELSE s.life_cycle_state
+    END AS "Sample Status",
     ms.sample_id AS "Master Sample ID",
     sp.sampling_point AS "Sampling point",
     TRIM(REGEXP_REPLACE(
@@ -388,14 +457,20 @@ equipment_results AS (
     )) AS "Sampling point description",
     sp.product_code AS "Product Code",
     sp.product_description AS "Product Description",
+    sp.cig_product_code AS "CIG_PRODUCT_CODE",
+    sp.cig_product_description AS "CIG_PRODUCT_DESCRIPTION",
+    sp.spec_group AS "Spec_Group",
+    proj.name AS "Task Plan Project",
     runset.runset_id AS "Task Plan ID",
+    runset.date_created AS "Task Plan Creation Date",
     tm.task_status AS "Task Status",
     NVL(er.result_field_name, 'Equipment Result') AS "Characteristic",
     TO_CHAR(er.result_numeric) AS "Result",
     er.result_text AS "Formatted result",
     er.result_entered AS "Result entered",
     'EQUIPMENT' AS "Result Source",
-    uom.description AS "UOM"
+    uom.description AS "UOM",
+    rp.tp_project_plan AS "Task Plan Project Plan"
   FROM equipment_resolved er
   JOIN task_map tm
     ON tm.proc_exec_id = er.proc_exec_id
@@ -407,6 +482,10 @@ equipment_results AS (
     ON sp.sample_raw_id = s.id
   LEFT JOIN hub_owner.req_runset runset
     ON tm.runset_id = runset.id
+  LEFT JOIN hub_owner.res_project proj
+    ON runset.project_id = proj.id
+  LEFT JOIN runset_properties rp
+    ON rp.runset_raw_id = runset.id
   LEFT JOIN hub_owner.cospc_object_identity coi_sample
     ON coi_sample.object_id = s.id
   LEFT JOIN hub_owner.sec_collab_space cs
