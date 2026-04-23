@@ -74,9 +74,6 @@ runset_properties AS (
     AND pv.string_value IS NOT NULL
 ),
 
-/* ============================================================
-   EQUIPMENT PARAMETER METADATA / VALUES
-   ============================================================ */
 equipment_param_defs AS (
   SELECT
     pe.id  AS proc_exec_id,
@@ -141,10 +138,6 @@ equipment_named AS (
   JOIN equipment_param_defs d
     ON d.peep_id = v.peep_id
 ),
-
-/* ============================================================
-   CLASSIFY FIELDS
-   ============================================================ */
 equipment_classified AS (
   SELECT
     en.*,
@@ -163,11 +156,6 @@ equipment_classified AS (
     END AS field_role
   FROM equipment_named en
 ),
-
-/* ============================================================
-   PACKET SHAPE
-   - used to distinguish single-sample packets vs multi-sample
-   ============================================================ */
 equipment_packet_shape AS (
   SELECT
     proc_elem_exec_id,
@@ -176,12 +164,6 @@ equipment_packet_shape AS (
   FROM equipment_classified
   GROUP BY proc_elem_exec_id
 ),
-
-/* ============================================================
-   PICK ONE WINNING RESULT FIELD PER PACKET ROW
-   - excludes known metadata
-   - prefers numeric over numeric_text over text over string
-   ============================================================ */
 equipment_result_candidates AS (
   SELECT
     ec.proc_exec_id,
@@ -233,10 +215,6 @@ equipment_selected_result AS (
   FROM equipment_result_candidates
   WHERE rn = 1
 ),
-
-/* ============================================================
-   ROW-LEVEL METADATA
-   ============================================================ */
 equipment_row_metadata AS (
   SELECT
     proc_exec_id,
@@ -258,10 +236,6 @@ equipment_row_metadata AS (
   FROM equipment_classified
   GROUP BY proc_exec_id, proc_elem_exec_id, item_index, group_index
 ),
-
-/* ============================================================
-   ONE ROW PER EQUIPMENT RESULT
-   ============================================================ */
 equipment_rows AS (
   SELECT
     m.proc_exec_id,
@@ -284,10 +258,6 @@ equipment_rows AS (
    AND r.item_index = m.item_index
    AND r.group_index = m.group_index
 ),
-
-/* ============================================================
-   ADD RETRIEVAL CONTEXT
-   ============================================================ */
 equipment_with_context AS (
   SELECT
     er.*,
@@ -307,10 +277,6 @@ equipment_with_context AS (
          SUBSTR(RAWTOHEX(pee.id),21,12)
        )
 ),
-
-/* ============================================================
-   FALLBACK MEASUREMENT ORDINALS
-   ============================================================ */
 fallback_measurements AS (
   SELECT
     meas_s.context_id,
@@ -323,14 +289,6 @@ fallback_measurements AS (
     ) - 1 AS derived_item_index
   FROM hub_owner.res_measurementsample meas_s
 ),
-
-/* ============================================================
-   RESOLVE SAMPLE
-   Order of preference:
-   1) explicit packet sample_id
-   2) multi-item packet => ordinal fallback
-   3) single-item packet => direct context fallback
-   ============================================================ */
 equipment_resolved AS (
   SELECT
     ewc.proc_exec_id,
@@ -375,7 +333,6 @@ equipment_resolved AS (
   LEFT JOIN hub_owner.sam_sample s_packet
     ON s_packet.sample_id = ewc.packet_sample_id
 
-  /* multi-item packets: ordinal fallback */
   LEFT JOIN fallback_measurements fm_multi
     ON fm_multi.context_id = ewc.context_id
    AND fm_multi.derived_item_index = ewc.item_index
@@ -385,19 +342,29 @@ equipment_resolved AS (
   LEFT JOIN hub_owner.sam_sample s_fb_multi
     ON s_fb_multi.id = fm_multi.mapped_sample_id
 
-  /* single-item packets: direct context fallback */
   LEFT JOIN fallback_measurements fm_single
     ON fm_single.context_id = ewc.context_id
    AND ewc.packet_sample_id IS NULL
    AND NVL(eps.max_item_index, 0) = 0
+   AND EXISTS (
+     SELECT 1
+     FROM hub_owner.req_task rt2
+     JOIN hub_owner.sam_sample s2
+       ON s2.id = fm_single.mapped_sample_id
+     WHERE rt2.work_item LIKE '%' || LOWER(
+           SUBSTR(RAWTOHEX(ewc.proc_exec_id),1,8)||'-'||
+           SUBSTR(RAWTOHEX(ewc.proc_exec_id),9,4)||'-'||
+           SUBSTR(RAWTOHEX(ewc.proc_exec_id),13,4)||'-'||
+           SUBSTR(RAWTOHEX(ewc.proc_exec_id),17,4)||'-'||
+           SUBSTR(RAWTOHEX(ewc.proc_exec_id),21,12)
+         ) || '%'
+       AND INSTR(','||rt2.sample_list||',', ','||s2.sample_id||',') > 0
+   )
 
   LEFT JOIN hub_owner.sam_sample s_fb_single
     ON s_fb_single.id = fm_single.mapped_sample_id
 ),
 
-/* ============================================================
-   MANUAL SIDE
-   ============================================================ */
 manual_results AS (
   SELECT DISTINCT
     s.NAME                      AS "Sample Name",
@@ -512,9 +479,6 @@ manual_results AS (
     AND cs.ID = '5FD74EE88C024C2EB908BCE0E176B0E8'
 ),
 
-/* ============================================================
-   EQUIPMENT SIDE
-   ============================================================ */
 equipment_results AS (
   SELECT DISTINCT
     s.NAME                      AS "Sample Name",
@@ -632,12 +596,10 @@ equipment_results AS (
         )
 )
 
-SELECT * FROM manual_results
-UNION ALL
-SELECT * FROM equipment_results;
-
-WHERE "Sample ID" IN (
-  'S007162','S007165','S007168','S007171','S007174',
-  'S007178','S007181','S007184','S007187','S007190',
-  'S005460'
+SELECT *
+FROM (
+  SELECT * FROM manual_results
+  UNION ALL
+  SELECT * FROM equipment_results
 )
+WHERE "Sample ID" = 'S005460';
