@@ -143,7 +143,32 @@ equipment_named AS (
 ),
 
 /* ============================================================
+   DYNAMIC RESULT CANDIDATES
+   Metadata fields are excluded; remaining valued fields are
+   treated as possible result fields.
+   ============================================================ */
+equipment_classified AS (
+  SELECT
+    en.*,
+    CASE
+      WHEN en.field_name IN (
+        'sample_id',
+        'data_id',
+        'meter_number',
+        'meter number',
+        'sampling_point_time',
+        'sampling point time',
+        'sampling point time *'
+      ) THEN 'METADATA'
+      ELSE 'CANDIDATE_RESULT'
+    END AS field_role
+  FROM equipment_named en
+),
+
+/* ============================================================
    ONE ROW PER EQUIPMENT RESULT
+   Packet metadata is extracted explicitly.
+   Result is chosen dynamically from non-metadata fields.
    ============================================================ */
 equipment_rows AS (
   SELECT
@@ -164,51 +189,69 @@ equipment_rows AS (
              THEN COALESCE(value_string, value_text, value_numeric_text, TO_CHAR(value_numeric))
         END) AS meter_number,
 
-    MAX(CASE WHEN field_name IN (
-                    'ov_meter_reading',
-                    'ov meter reading [%]',
-                    'ov meter reading [%] *',
-                    'ov_meter_reading_[%]'
-             )
-             THEN value_numeric
+    /* dynamic result selection */
+    MAX(CASE
+          WHEN field_role = 'CANDIDATE_RESULT'
+           AND value_numeric IS NOT NULL
+          THEN value_numeric
         END) AS result_numeric,
 
-    MAX(CASE WHEN field_name IN (
-                    'ov_meter_reading',
-                    'ov meter reading [%]',
-                    'ov meter reading [%] *',
-                    'ov_meter_reading_[%]'
-             )
-             THEN COALESCE(value_string, value_text, value_numeric_text, TO_CHAR(value_numeric))
+    MAX(CASE
+          WHEN field_role = 'CANDIDATE_RESULT'
+           AND (
+                value_string IS NOT NULL OR
+                value_text IS NOT NULL OR
+                value_numeric_text IS NOT NULL OR
+                value_numeric IS NOT NULL
+               )
+          THEN COALESCE(value_string, value_text, value_numeric_text, TO_CHAR(value_numeric))
         END) AS result_text,
 
-    MAX(CASE WHEN field_name IN (
-                    'ov_meter_reading',
-                    'ov meter reading [%]',
-                    'ov meter reading [%] *',
-                    'ov_meter_reading_[%]'
-             )
-             THEN interpretation
+    MAX(CASE
+          WHEN field_role = 'CANDIDATE_RESULT'
+           AND (
+                value_numeric IS NOT NULL OR
+                value_string IS NOT NULL OR
+                value_text IS NOT NULL OR
+                value_numeric_text IS NOT NULL
+               )
+          THEN interpretation
         END) AS result_interpretation,
 
-    MAX(CASE WHEN field_name IN (
-                    'ov_meter_reading',
-                    'ov meter reading [%]',
-                    'ov meter reading [%] *',
-                    'ov_meter_reading_[%]'
-             )
-             THEN last_updated
+    MAX(CASE
+          WHEN field_role = 'CANDIDATE_RESULT'
+           AND (
+                value_numeric IS NOT NULL OR
+                value_string IS NOT NULL OR
+                value_text IS NOT NULL OR
+                value_numeric_text IS NOT NULL
+               )
+          THEN last_updated
         END) AS result_entered,
 
-    MAX(CASE WHEN field_name IN (
-                    'ov_meter_reading',
-                    'ov meter reading [%]',
-                    'ov meter reading [%] *',
-                    'ov_meter_reading_[%]'
-             )
-             THEN unit_id
-        END) AS result_unit_id
-  FROM equipment_named
+    MAX(CASE
+          WHEN field_role = 'CANDIDATE_RESULT'
+           AND (
+                value_numeric IS NOT NULL OR
+                value_string IS NOT NULL OR
+                value_text IS NOT NULL OR
+                value_numeric_text IS NOT NULL
+               )
+          THEN unit_id
+        END) AS result_unit_id,
+
+    MAX(CASE
+          WHEN field_role = 'CANDIDATE_RESULT'
+           AND (
+                value_numeric IS NOT NULL OR
+                value_string IS NOT NULL OR
+                value_text IS NOT NULL OR
+                value_numeric_text IS NOT NULL
+               )
+          THEN field_name
+        END) AS result_field_name
+
+  FROM equipment_classified
   GROUP BY proc_exec_id, proc_elem_exec_id, item_index, group_index
 ),
 
@@ -237,7 +280,6 @@ equipment_with_context AS (
 
 /* ============================================================
    FALLBACK MEASUREMENT ORDINALS
-   Use ordinal position within context, not raw row_index.
    ============================================================ */
 fallback_measurements AS (
   SELECT
@@ -271,6 +313,7 @@ equipment_resolved AS (
     ewc.result_interpretation,
     ewc.result_entered,
     ewc.result_unit_id,
+    ewc.result_field_name,
     ewc.context_id,
 
     s_packet.id AS packet_sample_raw_id,
@@ -469,7 +512,7 @@ equipment_results AS (
     runset.RUNSET_ID            AS "Task Plan ID",
     runset.DATE_CREATED         AS "Task Plan Creation Date",
     rt.LIFE_CYCLE_STATE         AS "Task Status",
-    'OV Meter Reading [%]'      AS "Characteristic",
+    NVL(er.result_field_name, 'Equipment Result') AS "Characteristic",
     er.result_interpretation    AS "Compose Details",
     TO_CHAR(er.result_numeric)  AS "Result",
     NVL(er.result_text, TO_CHAR(er.result_numeric)) AS "Formatted result",
@@ -523,7 +566,10 @@ equipment_results AS (
     AND rt.LIFE_CYCLE_STATE IN ('released', 'completed')
     AND cs.ID = '5FD74EE88C024C2EB908BCE0E176B0E8'
     AND ms.SAMPLE_ID != 'planned'
-    AND er.result_numeric IS NOT NULL
+    AND (
+         er.result_numeric IS NOT NULL OR
+         er.result_text IS NOT NULL
+        )
 )
 
 SELECT * FROM manual_results
