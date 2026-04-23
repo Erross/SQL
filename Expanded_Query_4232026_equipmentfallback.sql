@@ -208,15 +208,12 @@ equipment_rows AS (
              )
              THEN unit_id
         END) AS result_unit_id
-
   FROM equipment_named
   GROUP BY proc_exec_id, proc_elem_exec_id, item_index, group_index
 ),
 
 /* ============================================================
-   FALLBACK MAPPING:
-   Use retrieval context + row_index = item_index only if
-   packet sample_id is missing.
+   ADD RETRIEVAL CONTEXT TO EQUIPMENT ROWS
    ============================================================ */
 equipment_with_context AS (
   SELECT
@@ -237,6 +234,29 @@ equipment_with_context AS (
          SUBSTR(RAWTOHEX(pee.id),21,12)
        )
 ),
+
+/* ============================================================
+   FALLBACK MEASUREMENT ORDINALS
+   Use ordinal position within context, not raw row_index.
+   ============================================================ */
+fallback_measurements AS (
+  SELECT
+    meas_s.context_id,
+    meas_s.mapped_sample_id,
+    meas_s.row_index,
+    meas_s.id AS meas_sample_id,
+    ROW_NUMBER() OVER (
+      PARTITION BY meas_s.context_id
+      ORDER BY meas_s.row_index, meas_s.id
+    ) - 1 AS derived_item_index
+  FROM hub_owner.res_measurementsample meas_s
+),
+
+/* ============================================================
+   RESOLVE SAMPLE:
+   1) explicit packet sample_id if present
+   2) otherwise fallback by context ordinal
+   ============================================================ */
 equipment_resolved AS (
   SELECT
     ewc.proc_exec_id,
@@ -264,12 +284,12 @@ equipment_resolved AS (
   FROM equipment_with_context ewc
   LEFT JOIN hub_owner.sam_sample s_packet
     ON s_packet.sample_id = ewc.packet_sample_id
-  LEFT JOIN hub_owner.res_measurementsample meas_s
-    ON meas_s.context_id = ewc.context_id
-   AND meas_s.row_index = ewc.item_index
+  LEFT JOIN fallback_measurements fm
+    ON fm.context_id = ewc.context_id
+   AND fm.derived_item_index = ewc.item_index
    AND ewc.packet_sample_id IS NULL
   LEFT JOIN hub_owner.sam_sample s_fallback
-    ON s_fallback.id = meas_s.mapped_sample_id
+    ON s_fallback.id = fm.mapped_sample_id
 ),
 
 /* ============================================================
