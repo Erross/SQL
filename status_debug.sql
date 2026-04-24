@@ -76,3 +76,68 @@ ORDER BY
   sp.sample_id,
   isf.source_position,
   isf.process_number;
+
+  //2nd query
+
+  WITH task_map AS (
+  SELECT
+    pe.id AS proc_exec_id,
+    rt.id AS task_raw_id,
+    rt.task_id,
+    runset.runset_id AS task_plan_id,
+    rt.sample_list,
+    rt.life_cycle_state AS task_status
+  FROM hub_owner.pex_proc_exec pe
+  JOIN hub_owner.req_task rt
+    ON rt.work_item LIKE '%' || LOWER(
+         SUBSTR(RAWTOHEX(pe.id),1,8)||'-'||
+         SUBSTR(RAWTOHEX(pe.id),9,4)||'-'||
+         SUBSTR(RAWTOHEX(pe.id),13,4)||'-'||
+         SUBSTR(RAWTOHEX(pe.id),17,4)||'-'||
+         SUBSTR(RAWTOHEX(pe.id),21,12)
+       ) || '%'
+  JOIN hub_owner.req_runset runset
+    ON runset.id = rt.runset_id
+  WHERE runset.runset_id IN ('TP102','TP570','TP586')
+),
+pee_states AS (
+  SELECT
+    tm.task_plan_id,
+    tm.task_id,
+    tm.proc_exec_id,
+    pee.id AS proc_elem_exec_id,
+    pee.source_position,
+    pee.process_number,
+    pee.state,
+    pee.item_states,
+    LENGTH(pee.item_states) AS item_states_len
+  FROM task_map tm
+  JOIN hub_owner.pex_proc_elem_exec pee
+    ON pee.parent_id = tm.proc_exec_id
+  WHERE pee.item_states IS NOT NULL
+)
+SELECT
+  ps.task_plan_id,
+  ps.task_id,
+  ps.source_position,
+  ps.process_number,
+  ps.state,
+  ps.item_states,
+  ps.item_states_len,
+  COUNT(peep.id) AS param_count
+FROM pee_states ps
+LEFT JOIN hub_owner.pex_proc_elem_exec_param peep
+  ON peep.parent_id = ps.proc_elem_exec_id
+GROUP BY
+  ps.task_plan_id,
+  ps.task_id,
+  ps.source_position,
+  ps.process_number,
+  ps.state,
+  ps.item_states,
+  ps.item_states_len
+ORDER BY
+  ps.task_plan_id,
+  ps.task_id,
+  ps.source_position,
+  ps.process_number;
