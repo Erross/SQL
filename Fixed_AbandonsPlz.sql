@@ -431,8 +431,8 @@ equipment_resolved AS (
    AND s_fb_single.id IS NULL
 ),
 
-manual_results AS (
-  SELECT DISTINCT
+manual_results_raw AS (
+  SELECT
     s.name AS "Sample Name",
     s.sample_id AS "Sample ID",
     ses.derived_status AS "Sample Status",
@@ -459,7 +459,20 @@ manual_results AS (
     pv.last_updated AS "Result entered",
     'MANUAL' AS "Result Source",
     uom.description AS "UOM",
-    rp.tp_project_plan AS "Task Plan Project Plan"
+    rp.tp_project_plan AS "Task Plan Project Plan",
+
+    ROW_NUMBER() OVER (
+      PARTITION BY
+        runset.runset_id,
+        s.sample_id,
+        p.display_name,
+        pv.value_string,
+        pv.value_text,
+        'MANUAL'
+      ORDER BY
+        pv.last_updated DESC NULLS LAST
+    ) AS manual_dedupe_rn
+
   FROM hub_owner.cor_parameter_value pv
   JOIN hub_owner.cor_parameter p
     ON pv.parent_identity = p.id
@@ -499,6 +512,36 @@ manual_results AS (
     AND p.value_type NOT IN ('Vocabulary')
     AND pv.value_string IS NOT NULL
     AND cs.id = '5FD74EE88C024C2EB908BCE0E176B0E8'
+),
+
+manual_results AS (
+  SELECT
+    "Sample Name",
+    "Sample ID",
+    "Sample Status",
+    "Master Sample ID",
+    "Sampling point",
+    "Sampling point description",
+    "LINE-1",
+    "Owner",
+    "Product Code",
+    "Product Description",
+    "CIG_PRODUCT_CODE",
+    "CIG_PRODUCT_DESCRIPTION",
+    "Spec_Group",
+    "Task Plan Project",
+    "Task Plan ID",
+    "Task Plan Creation Date",
+    "Task Status",
+    "Characteristic",
+    "Result",
+    "Formatted result",
+    "Result entered",
+    "Result Source",
+    "UOM",
+    "Task Plan Project Plan"
+  FROM manual_results_raw
+  WHERE manual_dedupe_rn = 1
 ),
 
 equipment_results AS (
