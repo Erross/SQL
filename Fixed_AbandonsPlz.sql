@@ -71,36 +71,62 @@ sample_properties AS (
     oi.object_id AS sample_raw_id,
 
     MAX(CASE WHEN p.display_label = 'Sampling Point'
-             THEN COALESCE(pv.string_value, SUBSTR(TO_CHAR(pv.long_string_value), 1, 4000), TO_CHAR(pv.number_value))
+             THEN COALESCE(
+                    pv.string_value,
+                    SUBSTR(TO_CHAR(pv.long_string_value), 1, 4000),
+                    TO_CHAR(pv.number_value)
+                  )
         END) AS sampling_point,
 
     MAX(CASE WHEN p.display_label = 'Sampling Point Description'
-             THEN COALESCE(pv.string_value, SUBSTR(TO_CHAR(pv.long_string_value), 1, 4000))
+             THEN COALESCE(
+                    pv.string_value,
+                    SUBSTR(TO_CHAR(pv.long_string_value), 1, 4000)
+                  )
         END) AS sampling_point_description,
 
     MAX(CASE WHEN p.display_label = 'Line'
-             THEN COALESCE(pv.string_value, SUBSTR(TO_CHAR(pv.long_string_value), 1, 4000), TO_CHAR(pv.number_value))
+             THEN COALESCE(
+                    pv.string_value,
+                    SUBSTR(TO_CHAR(pv.long_string_value), 1, 4000),
+                    TO_CHAR(pv.number_value)
+                  )
         END) AS line,
 
     MAX(CASE WHEN p.display_label = 'Product Code'
-             THEN COALESCE(pv.string_value, SUBSTR(TO_CHAR(pv.long_string_value), 1, 4000), TO_CHAR(pv.number_value))
+             THEN COALESCE(
+                    pv.string_value,
+                    SUBSTR(TO_CHAR(pv.long_string_value), 1, 4000),
+                    TO_CHAR(pv.number_value)
+                  )
         END) AS product_code,
 
     MAX(CASE WHEN p.display_label = 'Product Description'
-             THEN COALESCE(pv.string_value, SUBSTR(TO_CHAR(pv.long_string_value), 1, 4000))
+             THEN COALESCE(
+                    pv.string_value,
+                    SUBSTR(TO_CHAR(pv.long_string_value), 1, 4000)
+                  )
         END) AS product_description,
 
     MAX(CASE WHEN p.display_label = 'Cig Product Code'
-             THEN COALESCE(pv.string_value, SUBSTR(TO_CHAR(pv.long_string_value), 1, 4000), TO_CHAR(pv.number_value))
+             THEN COALESCE(
+                    pv.string_value,
+                    SUBSTR(TO_CHAR(pv.long_string_value), 1, 4000),
+                    TO_CHAR(pv.number_value)
+                  )
         END) AS cig_product_code,
 
     MAX(CASE WHEN p.display_label = 'Cig Product Description'
-             THEN COALESCE(pv.string_value, SUBSTR(TO_CHAR(pv.long_string_value), 1, 4000))
+             THEN COALESCE(
+                    pv.string_value,
+                    SUBSTR(TO_CHAR(pv.long_string_value), 1, 4000)
+                  )
         END) AS cig_product_description,
 
     MAX(CASE WHEN p.display_label = 'Spec Group'
              THEN REGEXP_REPLACE(pv.string_value, '^PK-','')
         END) AS spec_group
+
   FROM hub_owner.cor_class_identity ci
   JOIN hub_owner.cor_object_identity oi
     ON oi.class_identity_id = ci.id
@@ -207,23 +233,60 @@ equipment_named AS (
     ON d.peep_id = v.peep_id
 ),
 
-equipment_result_candidates AS (
+equipment_classified AS (
   SELECT
     en.*,
-    ROW_NUMBER() OVER (
-      PARTITION BY en.proc_exec_id, en.proc_elem_exec_id, en.item_index, en.group_index
-      ORDER BY en.source_position
-    ) AS rn
+    CASE
+      WHEN en.field_name IS NULL THEN 'LABEL'
+      WHEN en.field_name IN (
+        'sample_id',
+        'data_id',
+        'meter_number',
+        'meter number',
+        'sampling_point_time',
+        'sampling point time',
+        'sampling point time *'
+      ) THEN 'METADATA'
+      ELSE 'CANDIDATE_RESULT'
+    END AS field_role
   FROM equipment_named en
-  WHERE en.value_numeric IS NOT NULL
+),
+
+equipment_packet_shape AS (
+  SELECT
+    proc_elem_exec_id,
+    MAX(item_index) AS max_item_index
+  FROM equipment_classified
+  GROUP BY proc_elem_exec_id
+),
+
+equipment_result_candidates AS (
+  SELECT
+    ec.*,
+    ROW_NUMBER() OVER (
+      PARTITION BY ec.proc_exec_id, ec.proc_elem_exec_id, ec.item_index, ec.group_index
+      ORDER BY
+        CASE
+          WHEN ec.value_numeric IS NOT NULL THEN 1
+          WHEN ec.value_numeric_text IS NOT NULL THEN 2
+          WHEN ec.value_text IS NOT NULL THEN 3
+          WHEN ec.value_string IS NOT NULL THEN 4
+          ELSE 9
+        END,
+        ec.source_position,
+        ec.field_name
+    ) AS rn
+  FROM equipment_classified ec
+  WHERE ec.field_role = 'CANDIDATE_RESULT'
+    AND ec.value_numeric IS NOT NULL
     AND NOT (
-      en.field_name LIKE '%weight%'
-      OR en.field_name LIKE '%mass%'
-      OR en.field_name LIKE '%tare%'
-      OR en.field_name LIKE '%gross%'
-      OR en.field_name LIKE '%net_weight%'
-      OR en.field_name LIKE '%sample_weight%'
-      OR en.field_name LIKE '%dish_weight%'
+      ec.field_name LIKE '%weight%'
+      OR ec.field_name LIKE '%mass%'
+      OR ec.field_name LIKE '%tare%'
+      OR ec.field_name LIKE '%gross%'
+      OR ec.field_name LIKE '%net_weight%'
+      OR ec.field_name LIKE '%sample_weight%'
+      OR ec.field_name LIKE '%dish_weight%'
     )
 ),
 
@@ -233,17 +296,139 @@ equipment_selected_result AS (
   WHERE rn = 1
 ),
 
-equipment_resolved AS (
+equipment_row_metadata AS (
+  SELECT
+    proc_exec_id,
+    proc_elem_exec_id,
+    item_index,
+    group_index,
+    MAX(CASE WHEN field_name = 'sample_id'
+             THEN COALESCE(value_string, value_text, value_numeric_text, TO_CHAR(value_numeric))
+        END) AS packet_sample_id
+  FROM equipment_classified
+  GROUP BY proc_exec_id, proc_elem_exec_id, item_index, group_index
+),
+
+equipment_rows AS (
+  SELECT
+    m.proc_exec_id,
+    m.proc_elem_exec_id,
+    m.item_index,
+    m.group_index,
+    m.packet_sample_id,
+    r.field_name,
+    r.value_numeric,
+    r.value_numeric_text,
+    r.value_text,
+    r.value_string,
+    r.interpretation,
+    r.last_updated,
+    r.unit_id,
+    r.source_position
+  FROM equipment_row_metadata m
+  LEFT JOIN equipment_selected_result r
+    ON r.proc_exec_id = m.proc_exec_id
+   AND r.proc_elem_exec_id = m.proc_elem_exec_id
+   AND r.item_index = m.item_index
+   AND r.group_index = m.group_index
+),
+
+equipment_with_context AS (
   SELECT
     er.*,
-    s.id AS sample_raw_id,
-    s.sample_id
-  FROM equipment_selected_result er
-  JOIN task_map tm
-    ON tm.proc_exec_id = er.proc_exec_id
-  JOIN hub_owner.sam_sample s
-    ON s.sample_id =
-         REGEXP_SUBSTR(tm.sample_list, '[^,]+', 1, er.item_index + 1)
+    ctx.id AS context_id
+  FROM equipment_rows er
+  JOIN hub_owner.pex_proc_elem_exec pee
+    ON pee.id = er.proc_elem_exec_id
+  LEFT JOIN hub_owner.res_retrieval_context ctx
+    ON ctx.context =
+       'urn:pexelement:' ||
+       LOWER(
+         SUBSTR(RAWTOHEX(pee.id),1,8)||'-'||
+         SUBSTR(RAWTOHEX(pee.id),9,4)||'-'||
+         SUBSTR(RAWTOHEX(pee.id),13,4)||'-'||
+         SUBSTR(RAWTOHEX(pee.id),17,4)||'-'||
+         SUBSTR(RAWTOHEX(pee.id),21,12)
+       )
+),
+
+fallback_measurements AS (
+  SELECT
+    meas_s.context_id,
+    meas_s.mapped_sample_id,
+    ROW_NUMBER() OVER (
+      PARTITION BY meas_s.context_id
+      ORDER BY meas_s.row_index, meas_s.id
+    ) - 1 AS derived_item_index
+  FROM hub_owner.res_measurementsample meas_s
+),
+
+equipment_resolved AS (
+  SELECT
+    ewc.proc_exec_id,
+    ewc.proc_elem_exec_id,
+    ewc.item_index,
+    ewc.group_index,
+    ewc.packet_sample_id,
+    ewc.field_name,
+    ewc.value_numeric,
+    ewc.value_numeric_text,
+    ewc.value_text,
+    ewc.value_string,
+    ewc.interpretation,
+    ewc.last_updated,
+    ewc.unit_id,
+    ewc.source_position,
+
+    COALESCE(
+      s_packet.id,
+      s_fb_multi.id,
+      s_fb_single.id,
+      s_fb_task.id
+    ) AS sample_raw_id,
+
+    COALESCE(
+      s_packet.sample_id,
+      s_fb_multi.sample_id,
+      s_fb_single.sample_id,
+      s_fb_task.sample_id
+    ) AS sample_id
+
+  FROM equipment_with_context ewc
+
+  LEFT JOIN equipment_packet_shape eps
+    ON eps.proc_elem_exec_id = ewc.proc_elem_exec_id
+
+  LEFT JOIN hub_owner.sam_sample s_packet
+    ON s_packet.sample_id = ewc.packet_sample_id
+
+  LEFT JOIN fallback_measurements fm_multi
+    ON fm_multi.context_id = ewc.context_id
+   AND fm_multi.derived_item_index = ewc.item_index
+   AND s_packet.id IS NULL
+   AND NVL(eps.max_item_index, 0) > 0
+
+  LEFT JOIN hub_owner.sam_sample s_fb_multi
+    ON s_fb_multi.id = fm_multi.mapped_sample_id
+
+  LEFT JOIN fallback_measurements fm_single
+    ON fm_single.context_id = ewc.context_id
+   AND s_packet.id IS NULL
+   AND s_fb_multi.id IS NULL
+   AND NVL(eps.max_item_index, 0) = 0
+
+  LEFT JOIN hub_owner.sam_sample s_fb_single
+    ON s_fb_single.id = fm_single.mapped_sample_id
+
+  LEFT JOIN task_map tm_resolve
+    ON tm_resolve.proc_exec_id = ewc.proc_exec_id
+
+  LEFT JOIN hub_owner.sam_sample s_fb_task
+    ON s_fb_task.sample_id =
+         REGEXP_SUBSTR(tm_resolve.sample_list, '[^,]+', 1, ewc.item_index + 1)
+   AND s_packet.id IS NULL
+   AND s_fb_multi.id IS NULL
+   AND s_fb_single.id IS NULL
 ),
 
 manual_results AS (
@@ -316,110 +501,64 @@ manual_results AS (
     AND cs.id = '5FD74EE88C024C2EB908BCE0E176B0E8'
 ),
 
-equipment_results_deduped AS (
-  SELECT *
-  FROM (
-    SELECT
-      s.name AS "Sample Name",
-      s.sample_id AS "Sample ID",
-      ses.derived_status AS "Sample Status",
-      ms.sample_id AS "Master Sample ID",
-      sp.sampling_point AS "Sampling point",
-      TRIM(REGEXP_REPLACE(
-        REPLACE(REPLACE(sp.sampling_point_description, CHR(13), ''), CHR(10), ''),
-        '\s*\[[[:digit:]]+\]\s*$',''
-      )) AS "Sampling point description",
-      sp.line AS "LINE-1",
-      usr.name AS "Owner",
-      sp.product_code AS "Product Code",
-      sp.product_description AS "Product Description",
-      sp.cig_product_code AS "CIG_PRODUCT_CODE",
-      sp.cig_product_description AS "CIG_PRODUCT_DESCRIPTION",
-      sp.spec_group AS "Spec_Group",
-      proj.name AS "Task Plan Project",
-      runset.runset_id AS "Task Plan ID",
-      runset.date_created AS "Task Plan Creation Date",
-      tm.task_status AS "Task Status",
-      er.field_name AS "Characteristic",
-      TO_CHAR(er.value_numeric) AS "Result",
-      COALESCE(er.value_numeric_text, er.value_text, er.value_string, TO_CHAR(er.value_numeric)) AS "Formatted result",
-      er.last_updated AS "Result entered",
-      'EQUIPMENT' AS "Result Source",
-      uom.description AS "UOM",
-      rp.tp_project_plan AS "Task Plan Project Plan",
-
-      ROW_NUMBER() OVER (
-        PARTITION BY
-          s.sample_id,
-          er.field_name,
-          TO_CHAR(er.value_numeric),
-          COALESCE(er.value_numeric_text, er.value_text, er.value_string, TO_CHAR(er.value_numeric)),
-          runset.runset_id
-        ORDER BY
-          er.last_updated DESC,
-          er.source_position DESC,
-          er.proc_elem_exec_id DESC
-      ) AS dedupe_rn
-
-    FROM equipment_resolved er
-    JOIN task_map tm
-      ON tm.proc_exec_id = er.proc_exec_id
-    JOIN sample_exec_status ses
-      ON ses.sample_id = er.sample_id
-     AND ses.proc_exec_id = tm.proc_exec_id
-    JOIN hub_owner.sam_sample s
-      ON s.id = er.sample_raw_id
-    LEFT JOIN hub_owner.sam_sample ms
-      ON s.master_sample_id = ms.id
-    LEFT JOIN hub_owner.sec_user usr
-      ON s.owner_id = usr.id
-    LEFT JOIN sample_properties sp
-      ON sp.sample_raw_id = s.id
-    LEFT JOIN hub_owner.req_runset runset
-      ON tm.runset_id = runset.id
-    LEFT JOIN hub_owner.res_project proj
-      ON runset.project_id = proj.id
-    LEFT JOIN runset_properties rp
-      ON rp.runset_raw_id = runset.id
-    LEFT JOIN hub_owner.cor_unit uom
-      ON uom.id = er.unit_id
-    LEFT JOIN hub_owner.cospc_object_identity coi_sample
-      ON coi_sample.object_id = s.id
-    LEFT JOIN hub_owner.sec_collab_space cs
-      ON cs.id = coi_sample.collaborative_space_id
-    WHERE cs.id = '5FD74EE88C024C2EB908BCE0E176B0E8'
-      AND ms.sample_id != 'planned'
-  )
-  WHERE dedupe_rn = 1
-),
-
 equipment_results AS (
-  SELECT
-    "Sample Name",
-    "Sample ID",
-    "Sample Status",
-    "Master Sample ID",
-    "Sampling point",
-    "Sampling point description",
-    "LINE-1",
-    "Owner",
-    "Product Code",
-    "Product Description",
-    "CIG_PRODUCT_CODE",
-    "CIG_PRODUCT_DESCRIPTION",
-    "Spec_Group",
-    "Task Plan Project",
-    "Task Plan ID",
-    "Task Plan Creation Date",
-    "Task Status",
-    "Characteristic",
-    "Result",
-    "Formatted result",
-    "Result entered",
-    "Result Source",
-    "UOM",
-    "Task Plan Project Plan"
-  FROM equipment_results_deduped
+  SELECT DISTINCT
+    s.name AS "Sample Name",
+    s.sample_id AS "Sample ID",
+    ses.derived_status AS "Sample Status",
+    ms.sample_id AS "Master Sample ID",
+    sp.sampling_point AS "Sampling point",
+    TRIM(REGEXP_REPLACE(
+      REPLACE(REPLACE(sp.sampling_point_description, CHR(13), ''), CHR(10), ''),
+      '\s*\[[[:digit:]]+\]\s*$',''
+    )) AS "Sampling point description",
+    sp.line AS "LINE-1",
+    usr.name AS "Owner",
+    sp.product_code AS "Product Code",
+    sp.product_description AS "Product Description",
+    sp.cig_product_code AS "CIG_PRODUCT_CODE",
+    sp.cig_product_description AS "CIG_PRODUCT_DESCRIPTION",
+    sp.spec_group AS "Spec_Group",
+    proj.name AS "Task Plan Project",
+    runset.runset_id AS "Task Plan ID",
+    runset.date_created AS "Task Plan Creation Date",
+    tm.task_status AS "Task Status",
+    er.field_name AS "Characteristic",
+    TO_CHAR(er.value_numeric) AS "Result",
+    COALESCE(er.value_numeric_text, er.value_text, er.value_string, TO_CHAR(er.value_numeric)) AS "Formatted result",
+    er.last_updated AS "Result entered",
+    'EQUIPMENT' AS "Result Source",
+    uom.description AS "UOM",
+    rp.tp_project_plan AS "Task Plan Project Plan"
+  FROM equipment_resolved er
+  JOIN task_map tm
+    ON tm.proc_exec_id = er.proc_exec_id
+  JOIN sample_exec_status ses
+    ON ses.sample_id = er.sample_id
+   AND ses.proc_exec_id = tm.proc_exec_id
+  JOIN hub_owner.sam_sample s
+    ON s.id = er.sample_raw_id
+  LEFT JOIN hub_owner.sam_sample ms
+    ON s.master_sample_id = ms.id
+  LEFT JOIN hub_owner.sec_user usr
+    ON s.owner_id = usr.id
+  LEFT JOIN sample_properties sp
+    ON sp.sample_raw_id = s.id
+  LEFT JOIN hub_owner.req_runset runset
+    ON tm.runset_id = runset.id
+  LEFT JOIN hub_owner.res_project proj
+    ON runset.project_id = proj.id
+  LEFT JOIN runset_properties rp
+    ON rp.runset_raw_id = runset.id
+  LEFT JOIN hub_owner.cor_unit uom
+    ON uom.id = er.unit_id
+  LEFT JOIN hub_owner.cospc_object_identity coi_sample
+    ON coi_sample.object_id = s.id
+  LEFT JOIN hub_owner.sec_collab_space cs
+    ON cs.id = coi_sample.collaborative_space_id
+  WHERE cs.id = '5FD74EE88C024C2EB908BCE0E176B0E8'
+    AND ms.sample_id != 'planned'
+    AND er.value_numeric IS NOT NULL
 )
 
 SELECT *
