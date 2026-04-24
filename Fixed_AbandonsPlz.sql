@@ -544,8 +544,8 @@ manual_results AS (
   WHERE manual_dedupe_rn = 1
 ),
 
-equipment_results AS (
-  SELECT DISTINCT
+equipment_results_raw AS (
+  SELECT
     s.name AS "Sample Name",
     s.sample_id AS "Sample ID",
     ses.derived_status AS "Sample Status",
@@ -572,7 +572,22 @@ equipment_results AS (
     er.last_updated AS "Result entered",
     'EQUIPMENT' AS "Result Source",
     uom.description AS "UOM",
-    rp.tp_project_plan AS "Task Plan Project Plan"
+    rp.tp_project_plan AS "Task Plan Project Plan",
+
+    ROW_NUMBER() OVER (
+      PARTITION BY
+        runset.runset_id,
+        s.sample_id,
+        er.field_name,
+        TO_CHAR(er.value_numeric),
+        COALESCE(er.value_numeric_text, er.value_text, er.value_string, TO_CHAR(er.value_numeric)),
+        'EQUIPMENT'
+      ORDER BY
+        er.last_updated DESC NULLS LAST,
+        er.source_position DESC NULLS LAST,
+        er.proc_elem_exec_id DESC
+    ) AS equipment_dedupe_rn
+
   FROM equipment_resolved er
   JOIN task_map tm
     ON tm.proc_exec_id = er.proc_exec_id
@@ -602,6 +617,36 @@ equipment_results AS (
   WHERE cs.id = '5FD74EE88C024C2EB908BCE0E176B0E8'
     AND ms.sample_id != 'planned'
     AND er.value_numeric IS NOT NULL
+),
+
+equipment_results AS (
+  SELECT
+    "Sample Name",
+    "Sample ID",
+    "Sample Status",
+    "Master Sample ID",
+    "Sampling point",
+    "Sampling point description",
+    "LINE-1",
+    "Owner",
+    "Product Code",
+    "Product Description",
+    "CIG_PRODUCT_CODE",
+    "CIG_PRODUCT_DESCRIPTION",
+    "Spec_Group",
+    "Task Plan Project",
+    "Task Plan ID",
+    "Task Plan Creation Date",
+    "Task Status",
+    "Characteristic",
+    "Result",
+    "Formatted result",
+    "Result entered",
+    "Result Source",
+    "UOM",
+    "Task Plan Project Plan"
+  FROM equipment_results_raw
+  WHERE equipment_dedupe_rn = 1
 )
 
 SELECT *
