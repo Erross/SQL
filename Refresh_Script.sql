@@ -1,22 +1,20 @@
-BEGIN
-  DBMS_SCHEDULER.CREATE_JOB (
-    job_name        => 'ONELAB_RESULT_REPORT_REFRESH_JOB',
-    job_type        => 'PLSQL_BLOCK',
-    job_action      => q'[
 DECLARE
     v_last_refresh      TIMESTAMP;
     v_this_refresh      TIMESTAMP := CAST(SYSTIMESTAMP AS TIMESTAMP);
     v_changed_count     NUMBER;
     v_lookback_minutes  NUMBER := 10;
 BEGIN
+    -- Get last refresh time
     SELECT last_refresh_ts
     INTO v_last_refresh
     FROM onelab_report_refresh_state
     WHERE id = 1
     FOR UPDATE;
 
+    -- Clear temp table
     EXECUTE IMMEDIATE 'TRUNCATE TABLE onelab_changed_task_plans';
 
+    -- Detect changed Task Plans
     INSERT INTO onelab_changed_task_plans (task_plan_id)
     SELECT DISTINCT runset_id
     FROM (
@@ -103,6 +101,7 @@ BEGIN
     FROM onelab_changed_task_plans;
 
     IF v_changed_count > 0 THEN
+        -- Delete old rows
         DELETE FROM onelab_result_report r
         WHERE EXISTS (
             SELECT 1
@@ -110,6 +109,7 @@ BEGIN
             WHERE c.task_plan_id = r."Task Plan ID"
         );
 
+        -- Reinsert fresh rows (deduped)
         INSERT INTO onelab_result_report
         SELECT
             "Sample Name",
@@ -156,6 +156,7 @@ BEGIN
         WHERE rn = 1;
     END IF;
 
+    -- Update refresh time
     UPDATE onelab_report_refresh_state
     SET last_refresh_ts = v_this_refresh
     WHERE id = 1;
@@ -167,10 +168,3 @@ EXCEPTION
         ROLLBACK;
         RAISE;
 END;
-    ]',
-    start_date      => SYSTIMESTAMP,
-    repeat_interval => 'FREQ=MINUTELY;INTERVAL=1',
-    enabled         => TRUE
-  );
-END;
-/
