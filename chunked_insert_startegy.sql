@@ -23,41 +23,19 @@ DECLARE
 BEGIN
     LOOP
         INSERT INTO onelab_result_report
-        SELECT
-            "Task Plan ID",
-            "Sample ID",
-            "Task ID",
-            "Task Name",
-            "Task Status",
-            "Sample Name",
-            "Characteristic",
-            "Result",
-            "Formatted result",
-            "Result entered",
-            "Result Source"
+        SELECT *
         FROM (
-            SELECT s.*,
-                   ROW_NUMBER() OVER (
-                       PARTITION BY
-                           "Task Plan ID",
-                           "Sample ID",
-                           "Characteristic",
-                           "Result",
-                           "Formatted result",
-                           "Result Source"
-                       ORDER BY "Result entered" DESC NULLS LAST
-                   ) AS rn
+            SELECT s.*
             FROM vw_onelab_result_source s
             WHERE TO_NUMBER(REGEXP_SUBSTR("Task Plan ID", '[0-9]+'))
                   BETWEEN v_start_id AND v_end_id
-        )
-        WHERE rn = 1;
+        );
 
         v_rows := SQL%ROWCOUNT;
         COMMIT;
 
         DBMS_OUTPUT.PUT_LINE(
-            'Loaded Task Plan ID range '
+            'Loaded TP range '
             || v_start_id || ' - ' || v_end_id
             || ': ' || v_rows || ' rows'
         );
@@ -69,3 +47,45 @@ BEGIN
     END LOOP;
 END;
 /
+
+CREATE TABLE onelab_result_report_clean AS
+SELECT
+    "Sample Name",
+    "Sample ID",
+    "Sample Status",
+    "Master Sample ID",
+    "Sampling point",
+    "Sampling point description",
+    "LINE-1",
+    "Owner",
+    "Product Code",
+    "Product Description",
+    "CIG_PRODUCT_CODE",
+    "CIG_PRODUCT_DESCRIPTION",
+    "Spec_Group",
+    "Task Plan Project",
+    "Task Plan ID",
+    "Task Plan Creation Date",
+    "Task Status",
+    "Characteristic",
+    "Result",
+    "Formatted result",
+    "Result entered",
+    "Result Source",
+    "UOM",
+    "Task Plan Project Plan"
+FROM (
+    SELECT t.*,
+           ROW_NUMBER() OVER (
+               PARTITION BY
+                   "Task Plan ID",
+                   "Sample ID",
+                   "Characteristic",
+                   "Result",
+                   "Formatted result",
+                   "Result Source"
+               ORDER BY "Result entered" DESC NULLS LAST
+           ) rn
+    FROM onelab_result_report t
+)
+WHERE rn = 1;
