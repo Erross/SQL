@@ -89,3 +89,8 @@ FROM (
     FROM onelab_result_report t
 )
 WHERE rn = 1;
+
+DROP TABLE onelab_result_report PURGE;
+
+ALTER TABLE onelab_result_report_clean
+RENAME TO onelab_result_report;
