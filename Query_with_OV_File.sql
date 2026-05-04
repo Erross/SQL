@@ -1,15 +1,15 @@
 WITH
 /*
-    Query_with_OV_File - revised machine-result mapping
+    Query_with_OV_File - fixed machine-result mapping
 
-    Changes from the current GitHub query:
-      1. req_task.task_name is carried in task_map.
-      2. OV_Batch task executions are excluded at the process-task map, not by sample status.
-      3. Equipment parameter rows prefer the exact task sample-list item_index mapping before falling back
-         to RES_MEASUREMENTSAMPLE context mapping. This is intended to fix S1/S2 style switches such as TP009.
-      4. RES_MEASUREMENTSAMPLE fallback uses its actual ROW_INDEX, not a generated ROW_NUMBER, so row gaps/order
-         do not silently remap samples.
-      5. CSV/file fallback machine rows are only allowed when the sample has a non-OV_Batch process task context.
+    Known fixes included:
+      1. REQ_TASK.TASK_NAME is carried in task_map for diagnostics/future filtering.
+      2. Machine rows now require real process context: project name and project plan must resolve.
+         This removes TP247 / QAP_OVEN_PROCESS style rows without filtering out planned samples generally.
+      3. Equipment packet sample_id is trusted first when assigning machine rows to samples.
+         The TP009 diagnostic showed sample_id is present in VALUE_TEXT and row order can be wrong.
+      4. Task sample-list item_index and RES_MEASUREMENTSAMPLE.row_index are now fallback mappings only.
+      5. CSV/file fallback rows are also gated to a valid process context so helper/batch measurements do not leak back in.
 */
 
 task_map AS (
@@ -573,12 +573,12 @@ equipment_resolved AS (
     LEFT JOIN hub_owner.sam_sample s_packet
         ON s_packet.sample_id = ewc.packet_sample_id
 
-    /* Most important mapping change:
-       if this equipment row has the same item_index as the task sample list, use that first.
-       This keeps S1/S2/S3 rows attached to the exact task sample instead of relying on measurement ordering. */
+    /* Best mapping: the equipment packet's own sample_id.
+       TP009/T039 proved item_index order can be different from task sample_list order. */
     LEFT JOIN task_samples ts_fb
         ON ts_fb.proc_exec_id = ewc.proc_exec_id
        AND ts_fb.item_index = ewc.item_index
+       AND s_packet.id IS NULL
     LEFT JOIN hub_owner.sam_sample s_fb_task
         ON s_fb_task.sample_id = ts_fb.sample_id
        AND s_packet.id IS NULL
@@ -738,6 +738,8 @@ equipment_results_raw AS (
       AND NVL(ms.sample_id, 'x') != 'planned'
       AND er.value_numeric IS NOT NULL
       AND er.sample_raw_id IS NOT NULL
+      AND proj.name IS NOT NULL
+      AND rp.tp_project_plan IS NOT NULL
 ),
 
 equipment_results AS (
@@ -966,6 +968,43 @@ equipment_file_values AS (
         csv_ov_meter_reading
 ),
 
+equipment_file_values_contexted AS (
+    SELECT *
+    FROM (
+        SELECT
+            f.*,
+            proj.name AS context_project_name,
+            rs.runset_id AS context_task_plan_id,
+            rs.date_created AS context_task_plan_creation_date,
+            ts.task_status AS context_task_status,
+            rp.tp_project_plan AS context_task_plan_project_plan,
+            ROW_NUMBER() OVER (
+                PARTITION BY
+                    f.measurementsample_raw_id,
+                    f.measurement_raw_id
+                ORDER BY
+                    CASE
+                        WHEN rs.date_created <= NVL(f.measurement_last_updated, SYSDATE) THEN 0
+                        ELSE 1
+                    END,
+                    rs.date_created DESC,
+                    ts.task_id
+            ) AS context_rn
+        FROM equipment_file_values f
+        JOIN task_samples ts
+            ON ts.sample_id = f.sample_id
+        JOIN hub_owner.req_runset rs
+            ON rs.id = ts.runset_id
+        JOIN hub_owner.res_project proj
+            ON proj.id = rs.project_id
+        JOIN runset_properties rp
+            ON rp.runset_raw_id = rs.id
+        WHERE proj.name IS NOT NULL
+          AND rp.tp_project_plan IS NOT NULL
+    )
+    WHERE context_rn = 1
+),
+
 equipment_file_results AS (
     SELECT
         s.name AS "Sample Name",
@@ -987,59 +1026,10 @@ equipment_file_results AS (
         sp.cig_product_code AS "CIG_PRODUCT_CODE",
         sp.cig_product_description AS "CIG_PRODUCT_DESCRIPTION",
         sp.spec_group AS "Spec_Group",
-
-        (
-            SELECT MAX(proj2.name) KEEP (
-                DENSE_RANK FIRST ORDER BY
-                    CASE WHEN rs2.date_created <= NVL(f.measurement_last_updated, SYSDATE) THEN 0 ELSE 1 END,
-                    rs2.date_created DESC
-            )
-            FROM task_samples ts2
-            JOIN hub_owner.req_runset rs2
-                ON rs2.id = ts2.runset_id
-            LEFT JOIN hub_owner.res_project proj2
-                ON proj2.id = rs2.project_id
-            WHERE ts2.sample_id = s.sample_id
-        ) AS "Task Plan Project",
-
-        (
-            SELECT MAX(rs2.runset_id) KEEP (
-                DENSE_RANK FIRST ORDER BY
-                    CASE WHEN rs2.date_created <= NVL(f.measurement_last_updated, SYSDATE) THEN 0 ELSE 1 END,
-                    rs2.date_created DESC
-            )
-            FROM task_samples ts2
-            JOIN hub_owner.req_runset rs2
-                ON rs2.id = ts2.runset_id
-            WHERE ts2.sample_id = s.sample_id
-        ) AS "Task Plan ID",
-
-        (
-            SELECT MAX(rs2.date_created) KEEP (
-                DENSE_RANK FIRST ORDER BY
-                    CASE WHEN rs2.date_created <= NVL(f.measurement_last_updated, SYSDATE) THEN 0 ELSE 1 END,
-                    rs2.date_created DESC
-            )
-            FROM task_samples ts2
-            JOIN hub_owner.req_runset rs2
-                ON rs2.id = ts2.runset_id
-            WHERE ts2.sample_id = s.sample_id
-        ) AS "Task Plan Creation Date",
-
-        COALESCE(
-            (
-                SELECT MAX(ts2.task_status) KEEP (
-                    DENSE_RANK FIRST ORDER BY
-                        CASE WHEN rs2.date_created <= NVL(f.measurement_last_updated, SYSDATE) THEN 0 ELSE 1 END,
-                        rs2.date_created DESC
-                )
-                FROM task_samples ts2
-                JOIN hub_owner.req_runset rs2
-                    ON rs2.id = ts2.runset_id
-                WHERE ts2.sample_id = s.sample_id
-            ),
-            s.life_cycle_state
-        ) AS "Task Status",
+        f.context_project_name AS "Task Plan Project",
+        f.context_task_plan_id AS "Task Plan ID",
+        f.context_task_plan_creation_date AS "Task Plan Creation Date",
+        COALESCE(f.context_task_status, s.life_cycle_state) AS "Task Status",
 
         'ov_meter_reading' AS "Characteristic",
         TO_CHAR(f.ov_meter_reading) AS "Result",
@@ -1051,22 +1041,9 @@ equipment_file_results AS (
         f.measurement_last_updated AS "Result entered",
         'EQUIPMENT' AS "Result Source",
         'percent' AS "UOM",
+        f.context_task_plan_project_plan AS "Task Plan Project Plan"
 
-        (
-            SELECT MAX(rp2.tp_project_plan) KEEP (
-                DENSE_RANK FIRST ORDER BY
-                    CASE WHEN rs2.date_created <= NVL(f.measurement_last_updated, SYSDATE) THEN 0 ELSE 1 END,
-                    rs2.date_created DESC
-            )
-            FROM task_samples ts2
-            JOIN hub_owner.req_runset rs2
-                ON rs2.id = ts2.runset_id
-            LEFT JOIN runset_properties rp2
-                ON rp2.runset_raw_id = rs2.id
-            WHERE ts2.sample_id = s.sample_id
-        ) AS "Task Plan Project Plan"
-
-    FROM equipment_file_values f
+    FROM equipment_file_values_contexted f
     JOIN hub_owner.sam_sample s
         ON s.id = f.sample_raw_id
     LEFT JOIN hub_owner.sam_sample ms
@@ -1081,6 +1058,8 @@ equipment_file_results AS (
         ON cs.id = coi_sample.collaborative_space_id
     WHERE cs.id = '5FD74EE88C024C2EB908BCE0E176B0E8'
       AND NVL(ms.sample_id, 'x') != 'planned'
+      AND f.context_project_name IS NOT NULL
+      AND f.context_task_plan_project_plan IS NOT NULL
 )
 
 SELECT
