@@ -19,8 +19,6 @@ task_map AS (
     WHERE rt.life_cycle_state IN ('released', 'completed')
 ),
 
-/* Parse REQ_TASK.SAMPLE_LIST once into rows.
-   This avoids the old INSTR(','||sample_list||','...) join against every sample. */
 task_samples AS (
     SELECT
         tm.proc_exec_id,
@@ -298,8 +296,6 @@ equipment_packet_shape AS (
     GROUP BY proc_elem_exec_id
 ),
 
-/* Avoid ROW_NUMBER analytic here.
-   KEEP FIRST still requires grouping, but avoids a separate window sort. */
 equipment_selected_result AS (
     SELECT
         ec.proc_exec_id,
@@ -679,7 +675,7 @@ equipment_results AS (
         proj.name AS "Task Plan Project",
         runset.runset_id AS "Task Plan ID",
         runset.date_created AS "Task Plan Creation Date",
-        tm.task_status AS "Task Status",
+        ts.task_status AS "Task Status",
         er.field_name AS "Characteristic",
         TO_CHAR(er.value_numeric) AS "Result",
         COALESCE(
@@ -694,11 +690,15 @@ equipment_results AS (
         rp.tp_project_plan AS "Task Plan Project Plan"
 
     FROM equipment_resolved er
-    JOIN task_map tm
-        ON tm.proc_exec_id = er.proc_exec_id
+    JOIN task_samples ts
+        ON ts.proc_exec_id = er.proc_exec_id
+       AND ts.sample_id = er.sample_id
+       AND ts.item_index = er.item_index
     JOIN sample_exec_status ses
-        ON ses.sample_id = er.sample_id
-       AND ses.proc_exec_id = tm.proc_exec_id
+        ON ses.proc_exec_id = ts.proc_exec_id
+       AND ses.task_raw_id = ts.task_raw_id
+       AND ses.item_index = ts.item_index
+       AND ses.sample_id = ts.sample_id
     JOIN hub_owner.sam_sample s
         ON s.id = er.sample_raw_id
     LEFT JOIN hub_owner.sam_sample ms
@@ -708,7 +708,7 @@ equipment_results AS (
     LEFT JOIN sample_properties sp
         ON sp.sample_raw_id = s.id
     LEFT JOIN hub_owner.req_runset runset
-        ON tm.runset_id = runset.id
+        ON ts.runset_id = runset.id
     LEFT JOIN hub_owner.res_project proj
         ON runset.project_id = proj.id
     LEFT JOIN runset_properties rp
