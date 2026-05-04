@@ -211,3 +211,74 @@ ORDER BY
     target_sample_id,
     file_last_updated,
     file_size;
+
+    /* ============================================================
+   DIAGNOSTIC: Find FILE_METADATA row for remaining missing file
+
+   The failed join was:
+       FILE_METADATA.NAME = RES_MEASUREMENT.RECORD_NAME
+
+   Suspect:
+       record_name contains slash: 246_Total Blend RL/RCB_03-26-2026-GODWINWS.csv
+
+   This checks:
+   - exact record_name
+   - basename after slash
+   - date/operator token
+   - escaped/sanitized slash variants
+   ============================================================ */
+
+WITH target_record AS (
+    SELECT
+        '246_Total Blend RL/RCB_03-26-2026-GODWINWS.csv' AS record_name,
+        'RCB_03-26-2026-GODWINWS.csv' AS basename_after_slash,
+        '03-26-2026-GODWINWS' AS date_operator_token,
+        '246_Total Blend RL' AS prefix_before_slash,
+        'RCB' AS token_after_slash
+    FROM dual
+)
+SELECT
+    CASE
+        WHEN fm.name = tr.record_name THEN 'EXACT_RECORD_NAME'
+        WHEN fm.name = tr.basename_after_slash THEN 'BASENAME_AFTER_SLASH'
+        WHEN LOWER(fm.name) LIKE '%' || LOWER(tr.date_operator_token) || '%' THEN 'DATE_OPERATOR_TOKEN'
+        WHEN LOWER(fm.name) LIKE '%' || LOWER(tr.prefix_before_slash) || '%' THEN 'PREFIX_BEFORE_SLASH'
+        WHEN LOWER(fm.name) LIKE '%' || LOWER(tr.token_after_slash) || '%' THEN 'TOKEN_AFTER_SLASH'
+        ELSE 'OTHER'
+    END AS match_reason,
+
+    RAWTOHEX(fm.id) AS file_metadata_id,
+    fm.name AS file_name,
+    fm.storage_type,
+    fm.mime_type,
+    fm.file_size,
+    fm.date_created,
+    fm.last_updated,
+
+    DBMS_LOB.GETLENGTH(fc.content) AS blob_length,
+
+    CASE
+        WHEN fc.content IS NOT NULL
+        THEN UTL_RAW.CAST_TO_VARCHAR2(DBMS_LOB.SUBSTR(fc.content, 1000, 1))
+    END AS file_text_head
+
+FROM target_record tr
+JOIN hub_owner.file_metadata fm
+    ON (
+           fm.name = tr.record_name
+        OR fm.name = tr.basename_after_slash
+        OR LOWER(fm.name) LIKE '%' || LOWER(tr.date_operator_token) || '%'
+        OR LOWER(fm.name) LIKE '%' || LOWER(REPLACE(tr.record_name, '/', '%')) || '%'
+        OR LOWER(fm.name) LIKE '%' || LOWER(tr.prefix_before_slash) || '%'
+        OR LOWER(fm.name) LIKE '%' || LOWER(tr.token_after_slash) || '%'
+    )
+LEFT JOIN hub_owner.file_content fc
+    ON fc.file_id = fm.id
+ORDER BY
+    CASE
+        WHEN fm.name = tr.record_name THEN 1
+        WHEN fm.name = tr.basename_after_slash THEN 2
+        WHEN LOWER(fm.name) LIKE '%' || LOWER(tr.date_operator_token) || '%' THEN 3
+        ELSE 9
+    END,
+    fm.date_created DESC;
