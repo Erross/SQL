@@ -1,4 +1,5 @@
-WITH task_map AS (
+WITH
+task_map AS (
     SELECT
         pe.id AS proc_exec_id,
         rt.id AS task_raw_id,
@@ -16,6 +17,27 @@ WITH task_map AS (
             SUBSTR(RAWTOHEX(pe.id),21,12)
         ) || '%'
     WHERE rt.life_cycle_state IN ('released', 'completed')
+),
+
+/* Parse REQ_TASK.SAMPLE_LIST once into rows.
+   This avoids the old INSTR(','||sample_list||','...) join against every sample. */
+task_samples AS (
+    SELECT
+        tm.proc_exec_id,
+        tm.task_raw_id,
+        tm.task_id,
+        tm.runset_id,
+        tm.task_status,
+        n.lvl - 1 AS item_index,
+        REGEXP_SUBSTR(tm.sample_list, '[^,]+', 1, n.lvl) AS sample_id
+    FROM task_map tm
+    JOIN (
+        SELECT LEVEL AS lvl
+        FROM dual
+        CONNECT BY LEVEL <= 300
+    ) n
+        ON n.lvl <= REGEXP_COUNT(tm.sample_list, ',') + 1
+    WHERE REGEXP_SUBSTR(tm.sample_list, '[^,]+', 1, n.lvl) IS NOT NULL
 ),
 
 item_state_sample_flags AS (
@@ -51,19 +73,21 @@ item_state_sample_flags AS (
 
 sample_exec_status AS (
     SELECT
-        tm.proc_exec_id,
-        s.sample_id,
+        ts.proc_exec_id,
+        ts.task_raw_id,
+        ts.item_index,
+        ts.sample_id,
         COALESCE(
             issf.item_state_status,
-            tm.task_status,
+            ts.task_status,
             s.life_cycle_state
         ) AS derived_status
-    FROM task_map tm
+    FROM task_samples ts
     JOIN hub_owner.sam_sample s
-        ON INSTR(',' || tm.sample_list || ',', ',' || s.sample_id || ',') > 0
+        ON s.sample_id = ts.sample_id
     LEFT JOIN item_state_sample_flags issf
-        ON issf.proc_exec_id = tm.proc_exec_id
-       AND issf.sample_id = s.sample_id
+        ON issf.proc_exec_id = ts.proc_exec_id
+       AND issf.sample_id = ts.sample_id
 ),
 
 sample_properties AS (
@@ -184,6 +208,7 @@ equipment_param_defs AS (
         ON peep.parent_id = pee.id
     JOIN hub_owner.cor_parameter_value pv
         ON pv.parent_identity = peep.id
+    WHERE pv.value_key = 'AE'
     GROUP BY
         pe.id,
         pee.id,
@@ -215,6 +240,7 @@ equipment_param_values AS (
         ON peep.parent_id = pee.id
     JOIN hub_owner.cor_parameter_value pv
         ON pv.parent_identity = peep.id
+    WHERE pv.value_key = 'A'
     GROUP BY
         pe.id,
         pee.id,
@@ -272,16 +298,17 @@ equipment_packet_shape AS (
     GROUP BY proc_elem_exec_id
 ),
 
-equipment_result_candidates AS (
+/* Avoid ROW_NUMBER analytic here.
+   KEEP FIRST still requires grouping, but avoids a separate window sort. */
+equipment_selected_result AS (
     SELECT
-        ec.*,
-        ROW_NUMBER() OVER (
-            PARTITION BY
-                ec.proc_exec_id,
-                ec.proc_elem_exec_id,
-                ec.item_index,
-                ec.group_index
-            ORDER BY
+        ec.proc_exec_id,
+        ec.proc_elem_exec_id,
+        ec.item_index,
+        ec.group_index,
+
+        MAX(ec.field_name) KEEP (
+            DENSE_RANK FIRST ORDER BY
                 CASE
                     WHEN ec.value_numeric IS NOT NULL THEN 1
                     WHEN ec.value_numeric_text IS NOT NULL THEN 2
@@ -291,7 +318,112 @@ equipment_result_candidates AS (
                 END,
                 ec.source_position,
                 ec.field_name
-        ) AS rn
+        ) AS field_name,
+
+        MAX(ec.value_numeric) KEEP (
+            DENSE_RANK FIRST ORDER BY
+                CASE
+                    WHEN ec.value_numeric IS NOT NULL THEN 1
+                    WHEN ec.value_numeric_text IS NOT NULL THEN 2
+                    WHEN ec.value_text IS NOT NULL THEN 3
+                    WHEN ec.value_string IS NOT NULL THEN 4
+                    ELSE 9
+                END,
+                ec.source_position,
+                ec.field_name
+        ) AS value_numeric,
+
+        MAX(ec.value_numeric_text) KEEP (
+            DENSE_RANK FIRST ORDER BY
+                CASE
+                    WHEN ec.value_numeric IS NOT NULL THEN 1
+                    WHEN ec.value_numeric_text IS NOT NULL THEN 2
+                    WHEN ec.value_text IS NOT NULL THEN 3
+                    WHEN ec.value_string IS NOT NULL THEN 4
+                    ELSE 9
+                END,
+                ec.source_position,
+                ec.field_name
+        ) AS value_numeric_text,
+
+        MAX(ec.value_text) KEEP (
+            DENSE_RANK FIRST ORDER BY
+                CASE
+                    WHEN ec.value_numeric IS NOT NULL THEN 1
+                    WHEN ec.value_numeric_text IS NOT NULL THEN 2
+                    WHEN ec.value_text IS NOT NULL THEN 3
+                    WHEN ec.value_string IS NOT NULL THEN 4
+                    ELSE 9
+                END,
+                ec.source_position,
+                ec.field_name
+        ) AS value_text,
+
+        MAX(ec.value_string) KEEP (
+            DENSE_RANK FIRST ORDER BY
+                CASE
+                    WHEN ec.value_numeric IS NOT NULL THEN 1
+                    WHEN ec.value_numeric_text IS NOT NULL THEN 2
+                    WHEN ec.value_text IS NOT NULL THEN 3
+                    WHEN ec.value_string IS NOT NULL THEN 4
+                    ELSE 9
+                END,
+                ec.source_position,
+                ec.field_name
+        ) AS value_string,
+
+        MAX(ec.interpretation) KEEP (
+            DENSE_RANK FIRST ORDER BY
+                CASE
+                    WHEN ec.value_numeric IS NOT NULL THEN 1
+                    WHEN ec.value_numeric_text IS NOT NULL THEN 2
+                    WHEN ec.value_text IS NOT NULL THEN 3
+                    WHEN ec.value_string IS NOT NULL THEN 4
+                    ELSE 9
+                END,
+                ec.source_position,
+                ec.field_name
+        ) AS interpretation,
+
+        MAX(ec.last_updated) KEEP (
+            DENSE_RANK FIRST ORDER BY
+                CASE
+                    WHEN ec.value_numeric IS NOT NULL THEN 1
+                    WHEN ec.value_numeric_text IS NOT NULL THEN 2
+                    WHEN ec.value_text IS NOT NULL THEN 3
+                    WHEN ec.value_string IS NOT NULL THEN 4
+                    ELSE 9
+                END,
+                ec.source_position,
+                ec.field_name
+        ) AS last_updated,
+
+        MAX(ec.unit_id) KEEP (
+            DENSE_RANK FIRST ORDER BY
+                CASE
+                    WHEN ec.value_numeric IS NOT NULL THEN 1
+                    WHEN ec.value_numeric_text IS NOT NULL THEN 2
+                    WHEN ec.value_text IS NOT NULL THEN 3
+                    WHEN ec.value_string IS NOT NULL THEN 4
+                    ELSE 9
+                END,
+                ec.source_position,
+                ec.field_name
+        ) AS unit_id,
+
+        MIN(ec.source_position) KEEP (
+            DENSE_RANK FIRST ORDER BY
+                CASE
+                    WHEN ec.value_numeric IS NOT NULL THEN 1
+                    WHEN ec.value_numeric_text IS NOT NULL THEN 2
+                    WHEN ec.value_text IS NOT NULL THEN 3
+                    WHEN ec.value_string IS NOT NULL THEN 4
+                    ELSE 9
+                END,
+                ec.source_position,
+                ec.field_name
+        ) AS source_position
+
     FROM equipment_classified ec
     WHERE ec.field_role = 'CANDIDATE_RESULT'
       AND ec.value_numeric IS NOT NULL
@@ -304,12 +436,11 @@ equipment_result_candidates AS (
           OR ec.field_name LIKE '%sample_weight%'
           OR ec.field_name LIKE '%dish_weight%'
       )
-),
-
-equipment_selected_result AS (
-    SELECT *
-    FROM equipment_result_candidates
-    WHERE rn = 1
+    GROUP BY
+        ec.proc_exec_id,
+        ec.proc_elem_exec_id,
+        ec.item_index,
+        ec.group_index
 ),
 
 equipment_row_metadata AS (
@@ -437,15 +568,11 @@ equipment_resolved AS (
        AND NVL(eps.max_item_index, 0) = 0
     LEFT JOIN hub_owner.sam_sample s_fb_single
         ON s_fb_single.id = fm_single.mapped_sample_id
-    LEFT JOIN task_map tm_resolve
-        ON tm_resolve.proc_exec_id = ewc.proc_exec_id
+    LEFT JOIN task_samples ts_fb
+        ON ts_fb.proc_exec_id = ewc.proc_exec_id
+       AND ts_fb.item_index = ewc.item_index
     LEFT JOIN hub_owner.sam_sample s_fb_task
-        ON s_fb_task.sample_id = REGEXP_SUBSTR(
-            tm_resolve.sample_list,
-            '[^,]+',
-            1,
-            ewc.item_index + 1
-        )
+        ON s_fb_task.sample_id = ts_fb.sample_id
        AND s_packet.id IS NULL
        AND s_fb_multi.id IS NULL
        AND s_fb_single.id IS NULL
@@ -475,7 +602,7 @@ manual_results AS (
         proj.name AS "Task Plan Project",
         runset.runset_id AS "Task Plan ID",
         runset.date_created AS "Task Plan Creation Date",
-        tm.task_status AS "Task Status",
+        ts.task_status AS "Task Status",
         p.display_name AS "Characteristic",
         pv.value_string AS "Result",
         pv.value_text AS "Formatted result",
@@ -491,13 +618,15 @@ manual_results AS (
         ON p.id = rtp.parameter_id
     JOIN hub_owner.req_task rt
         ON rtp.task_id = rt.id
-    JOIN task_map tm
-        ON tm.task_raw_id = rt.id
+    JOIN task_samples ts
+        ON ts.task_raw_id = rt.id
+       AND ts.item_index = pv.item_index
     JOIN sample_exec_status ses
-        ON ses.sample_id = REGEXP_SUBSTR(rt.sample_list, '[^,]+', 1, pv.item_index + 1)
-       AND ses.proc_exec_id = tm.proc_exec_id
+        ON ses.proc_exec_id = ts.proc_exec_id
+       AND ses.task_raw_id = ts.task_raw_id
+       AND ses.item_index = ts.item_index
     JOIN hub_owner.sam_sample s
-        ON s.sample_id = ses.sample_id
+        ON s.sample_id = ts.sample_id
     LEFT JOIN hub_owner.sam_sample ms
         ON s.master_sample_id = ms.id
     LEFT JOIN hub_owner.sec_user usr
@@ -780,18 +909,6 @@ equipment_file_values AS (
       AND REGEXP_LIKE(efe.csv_ov_meter_reading, '^-?[0-9]+(\.[0-9]+)?$')
 ),
 
-runset_one_per_sample AS (
-    SELECT
-        rss.sample_id,
-        MAX(rss.runset_id) KEEP (
-            DENSE_RANK LAST ORDER BY rs.date_created
-        ) AS runset_id
-    FROM hub_owner.req_runset_sample rss
-    JOIN hub_owner.req_runset rs
-        ON rs.id = rss.runset_id
-    GROUP BY rss.sample_id
-),
-
 equipment_file_results AS (
     SELECT
         s.name AS "Sample Name",
@@ -814,9 +931,9 @@ equipment_file_results AS (
         sp.cig_product_description AS "CIG_PRODUCT_DESCRIPTION",
         sp.spec_group AS "Spec_Group",
 
-        proj.name AS "Task Plan Project",
-        runset.runset_id AS "Task Plan ID",
-        runset.date_created AS "Task Plan Creation Date",
+        CAST(NULL AS VARCHAR2(255)) AS "Task Plan Project",
+        CAST(NULL AS VARCHAR2(255)) AS "Task Plan ID",
+        CAST(NULL AS DATE) AS "Task Plan Creation Date",
 
         s.life_cycle_state AS "Task Status",
 
@@ -836,7 +953,7 @@ equipment_file_results AS (
 
         'percent' AS "UOM",
 
-        rp.tp_project_plan AS "Task Plan Project Plan"
+        CAST(NULL AS VARCHAR2(255)) AS "Task Plan Project Plan"
 
     FROM equipment_file_values f
     JOIN hub_owner.sam_sample s
@@ -847,14 +964,6 @@ equipment_file_results AS (
         ON s.owner_id = usr.id
     LEFT JOIN sample_properties sp
         ON sp.sample_raw_id = s.id
-    LEFT JOIN runset_one_per_sample rss_one
-        ON rss_one.sample_id = s.id
-    LEFT JOIN hub_owner.req_runset runset
-        ON runset.id = rss_one.runset_id
-    LEFT JOIN runset_properties rp
-        ON rp.runset_raw_id = runset.id
-    LEFT JOIN hub_owner.res_project proj
-        ON proj.id = runset.project_id
     LEFT JOIN hub_owner.cospc_object_identity coi_sample
         ON coi_sample.object_id = s.id
     LEFT JOIN hub_owner.sec_collab_space cs
@@ -947,4 +1056,4 @@ SELECT
     "Result Source",
     "UOM",
     "Task Plan Project Plan"
-FROM equipment_file_results;
+FROM equipment_file_results
