@@ -571,3 +571,151 @@ ORDER BY
     ss.target_sample,
     rm.record_date,
     rms.row_index;
+
+    --metachecker
+
+    /* ============================================================
+   DIAGNOSTIC C:
+   Look for file metadata rows matching the parser result files
+   referenced by RES_EQUIPMENT_WORK_ITEM.LAST_PARSE_RESULT.
+
+   Goal:
+   Determine whether the CSV / parsed_xy_data files are available
+   through OneLab file metadata tables, or only as PLP runtime URLs.
+   ============================================================ */
+
+WITH target_samples AS (
+    SELECT 'S007425' AS sample_name FROM dual UNION ALL
+    SELECT 'S004742' FROM dual UNION ALL
+    SELECT 'S006375' FROM dual UNION ALL
+    SELECT 'S004384' FROM dual
+),
+sample_scope AS (
+    SELECT
+        ts.sample_name AS target_sample,
+        s.id           AS sample_pk,
+        s.name         AS sample_name,
+        s.sample_id    AS sample_id
+    FROM target_samples ts
+    JOIN sam_sample s
+        ON s.name = ts.sample_name
+        OR s.sample_id = ts.sample_name
+),
+packet_scope AS (
+    SELECT DISTINCT
+        ss.target_sample,
+        ss.sample_name,
+        ss.sample_id,
+        rms.id AS measurementsample_pk,
+        rms.sample_id AS rms_sample_id_text,
+        rms.mapped_sample_id,
+        rms.row_index,
+        rm.id AS measurement_pk,
+        rm.record_name,
+        rm.measurement_type,
+        rm.equipment_work_item_id,
+        ewi.work_item_identifier,
+        ewi.last_parse_result
+    FROM sample_scope ss
+    JOIN res_measurementsample rms
+        ON rms.mapped_sample_id = ss.sample_pk
+        OR rms.sample_id = ss.sample_name
+        OR rms.sample_id = ss.sample_id
+    JOIN res_measurement rm
+        ON rm.id = rms.measurement_id
+    LEFT JOIN res_equipment_work_item ewi
+        ON ewi.id = rm.equipment_work_item_id
+    WHERE rm.measurement_type = 'Data Packet'
+)
+SELECT
+    ps.target_sample,
+    ps.sample_name,
+    ps.sample_id,
+    ps.rms_sample_id_text,
+    ps.row_index,
+    ps.measurement_pk,
+    ps.record_name,
+    ps.equipment_work_item_id,
+    ps.work_item_identifier,
+
+    fm.id AS file_metadata_id,
+    fm.name AS file_name,
+    fm.mime_type,
+    fm.storage_type,
+    fm.file_size,
+    fm.date_created AS file_date_created,
+    fm.last_updated AS file_last_updated,
+
+    s3.bucket_name,
+    s3.uri AS s3_uri,
+    s3.region,
+    s3.endpoint,
+
+    ref.url AS ref_url,
+
+    SUBSTR(ps.last_parse_result, 1, 3000) AS last_parse_result_snip
+
+FROM packet_scope ps
+LEFT JOIN file_metadata fm
+    ON LOWER(fm.name) = LOWER(ps.record_name)
+    OR LOWER(ps.last_parse_result) LIKE '%' || LOWER(fm.name) || '%'
+LEFT JOIN hub_s3_file_metadata s3
+    ON s3.file_id = fm.id
+LEFT JOIN hub_ref_url_file_metadata ref
+    ON ref.file_id = fm.id
+ORDER BY
+    ps.target_sample,
+    ps.record_name,
+    fm.name;
+
+    --metachecker2
+
+    /* ============================================================
+   DIAGNOSTIC D:
+   Search COR_PARAMETER_VALUE for the known-good OV readings.
+
+   We know these values appear in the export:
+   S006375 = 14.1097
+   S004384 = 19.0320
+
+   If these show up in COR_PARAMETER_VALUE, then the current report
+   is getting good rows from task/result parameters, while missing
+   packet-only rows.
+   ============================================================ */
+
+SELECT
+    cp.id AS parameter_pk,
+    cp.name AS parameter_name,
+    cp.display_name AS parameter_display_name,
+    cp.value_type AS parameter_value_type,
+
+    cpv.id AS parameter_value_pk,
+    cpv.parent_identity,
+    cpv.item_index,
+    cpv.group_index,
+    cpv.value_key,
+    cpv.value_numeric,
+    cpv.value_numeric_text,
+    cpv.value_integer,
+    cpv.value_string,
+    cpv.value_text,
+    CASE
+        WHEN cpv.value_long_text IS NOT NULL
+        THEN DBMS_LOB.SUBSTR(cpv.value_long_text, 1000, 1)
+    END AS value_long_text_snip,
+    cpv.unit,
+    cpv.unit_urn,
+    cpv.last_updated
+FROM cor_parameter cp
+JOIN cor_parameter_value cpv
+    ON cpv.parent_identity = cp.id
+WHERE
+       ABS(cpv.value_numeric - 14.1097) < 0.00001
+    OR ABS(cpv.value_numeric - 19.0320) < 0.00001
+    OR cpv.value_numeric_text IN ('14.1097', '19.0320', '14.109700', '19.032000')
+    OR cpv.value_string IN ('14.1097', '19.0320', '14.109700', '19.032000')
+    OR cpv.value_text IN ('14.1097', '19.0320', '14.109700', '19.032000')
+ORDER BY
+    cp.display_name,
+    cp.name,
+    cpv.last_updated DESC;
