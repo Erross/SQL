@@ -7,12 +7,12 @@ WITH
       2. Machine rows require real process context: project name and project plan must resolve.
          This removes TP247 / QAP_OVEN_PROCESS style rows without filtering out planned samples generally.
       3. Sample ID is cardinal. The instrument/packet sample_id can be manually changed and is not trusted
-         for assigning the business/result sample. Equipment rows now prefer task sample_list item_index first.
+         for assigning the business/result sample. Equipment rows now prefer global task sample-list position first, so combined equipment packets across sibling tasks map to the Biovia Sample ID (Name) column.
       4. RES_MEASUREMENTSAMPLE.row_index is second fallback. Packet/instrument sample_id is last fallback only.
       5. CSV/file fallback rows are also gated to a valid process context so helper/batch measurements do not leak back in.
 */
 
-task_map AS (
+task_map_base AS (
     SELECT
         pe.id AS proc_exec_id,
         rt.id AS task_raw_id,
@@ -20,7 +20,8 @@ task_map AS (
         rt.task_name,
         rt.runset_id,
         rt.sample_list,
-        rt.life_cycle_state AS task_status
+        rt.life_cycle_state AS task_status,
+        REGEXP_COUNT(rt.sample_list, ',') + 1 AS sample_count
     FROM hub_owner.pex_proc_exec pe
     JOIN hub_owner.req_task rt
         ON rt.work_item LIKE '%' || LOWER(
@@ -35,6 +36,20 @@ task_map AS (
       AND NVL(UPPER(rt.task_name), 'x') NOT LIKE 'OV_BATCH%'
 ),
 
+task_map AS (
+    SELECT
+        tmb.*,
+        NVL(
+            SUM(tmb.sample_count) OVER (
+                PARTITION BY tmb.proc_exec_id
+                ORDER BY tmb.task_id, tmb.task_raw_id
+                ROWS BETWEEN UNBOUNDED PRECEDING AND 1 PRECEDING
+            ),
+            0
+        ) AS base_item_index
+    FROM task_map_base tmb
+),
+
 task_samples AS (
     SELECT
         tm.proc_exec_id,
@@ -44,6 +59,14 @@ task_samples AS (
         tm.runset_id,
         tm.task_status,
         n.lvl - 1 AS item_index,
+
+        /*
+            Local item_index is used for manual task parameters.
+            global_item_index is used for equipment packets that are stored as one combined
+            packet across multiple sibling tasks in the same process execution.
+        */
+        tm.base_item_index + n.lvl - 1 AS global_item_index,
+
         REGEXP_SUBSTR(tm.sample_list, '[^,]+', 1, n.lvl) AS sample_id
     FROM task_map tm
     JOIN (
@@ -559,13 +582,17 @@ equipment_resolved AS (
 
         /*
             Sample ID is cardinal for reporting.
-            The packet/instrument sample_id can be manually changed in OneLab and is not reliable
-            for assigning the business/result sample.
 
-            Resolution priority:
-              1. Task sample_list item_index: matches the Sample ID (Name) column shown on the task screen.
-              2. RES_MEASUREMENTSAMPLE row_index: secondary structural fallback.
-              3. Packet/instrument sample_id: last fallback only, never allowed to override the task sample.
+            Important distinction:
+              - item_index on manual task parameters is local to a REQ_TASK.
+              - equipment packets can be stored as one combined packet across sibling
+                tasks in the same process execution.
+
+            Therefore the primary equipment mapping is:
+              equipment item_index -> task_samples.global_item_index
+
+            The packet/instrument sample_id can be manually edited, so it is only a
+            last-resort fallback and must never override the business Sample ID.
         */
         COALESCE(
             s_fb_task.id,
@@ -577,18 +604,23 @@ equipment_resolved AS (
             s_fb_task.sample_id,
             s_fb_idx.sample_id,
             s_packet.sample_id
-        ) AS sample_id
+        ) AS sample_id,
+
+        COALESCE(
+            ts_fb.task_raw_id,
+            ts_idx.task_raw_id
+        ) AS resolved_task_raw_id
 
     FROM equipment_with_context ewc
 
-    /* 1. Primary mapping: task sample_list position / business Sample ID. */
+    /* 1. Primary mapping: global task sample position / business Sample ID. */
     LEFT JOIN task_samples ts_fb
         ON ts_fb.proc_exec_id = ewc.proc_exec_id
-       AND ts_fb.item_index = ewc.item_index
+       AND ts_fb.global_item_index = ewc.item_index
     LEFT JOIN hub_owner.sam_sample s_fb_task
         ON s_fb_task.sample_id = ts_fb.sample_id
 
-    /* 2. Secondary fallback: measurement-sample row index, only when task-position mapping failed. */
+    /* 2. Secondary fallback: measurement-sample row index, only when global task-position mapping failed. */
     LEFT JOIN fallback_measurements fm_idx
         ON fm_idx.context_id = ewc.context_id
        AND fm_idx.derived_item_index = ewc.item_index
@@ -597,12 +629,18 @@ equipment_resolved AS (
         ON s_fb_idx.id = fm_idx.mapped_sample_id
        AND s_fb_task.id IS NULL
 
+    /* Try to locate the task context for the RMS fallback sample without duplicating across all sibling tasks. */
+    LEFT JOIN task_samples ts_idx
+        ON ts_idx.proc_exec_id = ewc.proc_exec_id
+       AND ts_idx.sample_id = s_fb_idx.sample_id
+       AND s_fb_task.id IS NULL
+
     /* 3. Last fallback only: packet/instrument sample_id. */
     LEFT JOIN hub_owner.sam_sample s_packet
         ON s_packet.sample_id = ewc.packet_sample_id
        AND s_fb_task.id IS NULL
        AND s_fb_idx.id IS NULL
-)
+),
 
 manual_results AS (
     SELECT
@@ -721,10 +759,11 @@ equipment_results_raw AS (
 
     FROM equipment_resolved er
     JOIN task_map tm
-        ON tm.proc_exec_id = er.proc_exec_id
+        ON tm.task_raw_id = er.resolved_task_raw_id
     JOIN sample_exec_status ses
         ON ses.sample_id = er.sample_id
        AND ses.proc_exec_id = tm.proc_exec_id
+       AND ses.task_raw_id = tm.task_raw_id
     JOIN hub_owner.sam_sample s
         ON s.id = er.sample_raw_id
     LEFT JOIN hub_owner.sam_sample ms
