@@ -476,3 +476,98 @@ ORDER BY
     ms.row_index,
     df.display_order NULLS LAST,
     df.name;
+
+    /* ============================================================
+   DIAGNOSTIC B:
+   Compare a known-good exported ov_meter_reading sample against
+   known-missing complaint samples.
+
+   Known-good examples from the current export:
+   - S006375 has ov_meter_reading
+   - S004384 has ov_meter_reading
+
+   Known-missing examples:
+   - S007425
+   - S004742
+   ============================================================ */
+
+WITH target_samples AS (
+    SELECT 'GOOD_EXPORT_HAS_OV' AS bucket, 'S006375' AS sample_name FROM dual UNION ALL
+    SELECT 'GOOD_EXPORT_HAS_OV', 'S004384' FROM dual UNION ALL
+    SELECT 'MISSING_OV', 'S007425' FROM dual UNION ALL
+    SELECT 'MISSING_OV', 'S004742' FROM dual
+),
+sample_scope AS (
+    SELECT
+        ts.bucket,
+        ts.sample_name AS target_sample,
+        s.id           AS sample_pk,
+        s.name         AS sample_name,
+        s.sample_id    AS sample_id
+    FROM target_samples ts
+    JOIN sam_sample s
+        ON s.name = ts.sample_name
+        OR s.sample_id = ts.sample_name
+)
+SELECT
+    ss.bucket,
+    ss.target_sample,
+    ss.sample_name,
+    ss.sample_id,
+
+    rms.id AS measurementsample_pk,
+    rms.sample_id AS rms_sample_id_text,
+    rms.mapped_sample_id,
+    rms.row_index,
+    rms.context_id,
+
+    rm.id AS measurement_pk,
+    rm.record_name,
+    rm.measurement_type,
+    rm.record_date,
+    rm.date_created,
+    rm.last_updated,
+    rm.equipment_work_item_id,
+    rm.equipment_id,
+    rm.command_id,
+
+    SUBSTR(rm.info, 1, 3000) AS measurement_info_snip,
+    SUBSTR(rm.raw_data, 1, 1000) AS raw_data_snip,
+    CASE
+        WHEN rm.raw_data_long_text IS NOT NULL
+        THEN DBMS_LOB.SUBSTR(rm.raw_data_long_text, 3000, 1)
+    END AS raw_data_long_text_snip,
+
+    e.nickname AS equipment_nickname,
+    et.name AS equipment_type_name,
+    dp.name AS data_packet_name,
+
+    ewi.state AS work_item_state,
+    ewi.work_item_identifier,
+    SUBSTR(ewi.additional_context, 1, 3000) AS work_item_additional_context,
+    SUBSTR(ewi.file_references, 1, 3000) AS work_item_file_references,
+    ewi.last_parse_result
+
+FROM sample_scope ss
+LEFT JOIN res_measurementsample rms
+    ON rms.mapped_sample_id = ss.sample_pk
+    OR rms.sample_id = ss.sample_name
+    OR rms.sample_id = ss.sample_id
+LEFT JOIN res_measurement rm
+    ON rm.id = rms.measurement_id
+LEFT JOIN res_equipment e
+    ON e.id = rm.equipment_id
+LEFT JOIN res_equipment_type et
+    ON et.id = e.equipment_type_id
+LEFT JOIN res_data_packet dp
+    ON dp.id = et.data_packet_id
+LEFT JOIN res_equipment_work_item ewi
+    ON ewi.id = rm.equipment_work_item_id
+WHERE
+    rm.measurement_type = 'Data Packet'
+    OR rm.measurement_type IS NULL
+ORDER BY
+    ss.bucket,
+    ss.target_sample,
+    rm.record_date,
+    rms.row_index;
