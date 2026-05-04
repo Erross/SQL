@@ -332,3 +332,147 @@ ORDER BY
     rm.record_date,
     rms.row_index,
     rm.record_name;
+
+    /* ============================================================
+   DIAGNOSTIC A:
+   For the missing OV samples, show the measurement packet,
+   work item, equipment type, data packet, and field definitions.
+
+   This should tell us whether the packet definition contains:
+   - Instrument Sample ID
+   - Data Id
+   - Meter Number
+   - OV Meter Reading [%]
+   - Sampling Point Time
+   ============================================================ */
+
+WITH target_samples AS (
+    SELECT 'S007425' AS sample_name FROM dual UNION ALL
+    SELECT 'S007428' FROM dual UNION ALL
+    SELECT 'S007431' FROM dual UNION ALL
+    SELECT 'S007434' FROM dual UNION ALL
+    SELECT 'S007438' FROM dual UNION ALL
+    SELECT 'S007441' FROM dual UNION ALL
+    SELECT 'S007450' FROM dual UNION ALL
+    SELECT 'S007453' FROM dual UNION ALL
+    SELECT 'S005476' FROM dual UNION ALL
+    SELECT 'S005492' FROM dual UNION ALL
+    SELECT 'S004362' FROM dual UNION ALL
+    SELECT 'S004742' FROM dual UNION ALL
+    SELECT 'S004745' FROM dual UNION ALL
+    SELECT 'S004748' FROM dual UNION ALL
+    SELECT 'S004751' FROM dual UNION ALL
+    SELECT 'S004754' FROM dual UNION ALL
+    SELECT 'S004757' FROM dual UNION ALL
+    SELECT 'S004760' FROM dual
+),
+sample_scope AS (
+    SELECT
+        ts.sample_name AS target_sample,
+        s.id           AS sample_pk,
+        s.name         AS sample_name,
+        s.sample_id    AS sample_id
+    FROM target_samples ts
+    JOIN sam_sample s
+        ON s.name = ts.sample_name
+        OR s.sample_id = ts.sample_name
+),
+measurement_scope AS (
+    SELECT
+        ss.target_sample,
+        ss.sample_name,
+        ss.sample_id,
+        rms.id AS measurementsample_pk,
+        rms.sample_id AS rms_sample_id_text,
+        rms.mapped_sample_id,
+        rms.row_index,
+        rms.context_id,
+        rm.id AS measurement_pk,
+        rm.record_name,
+        rm.measurement_type,
+        rm.record_date,
+        rm.date_created,
+        rm.last_updated,
+        rm.equipment_work_item_id,
+        rm.equipment_id,
+        rm.command_id,
+        rm.raw_data,
+        rm.raw_data_long_text,
+        rm.info
+    FROM sample_scope ss
+    JOIN res_measurementsample rms
+        ON rms.mapped_sample_id = ss.sample_pk
+        OR rms.sample_id = ss.sample_name
+        OR rms.sample_id = ss.sample_id
+    JOIN res_measurement rm
+        ON rm.id = rms.measurement_id
+    WHERE rm.measurement_type = 'Data Packet'
+)
+SELECT
+    ms.target_sample,
+    ms.sample_name,
+    ms.sample_id,
+    ms.rms_sample_id_text,
+    ms.row_index,
+    ms.record_name,
+    ms.measurement_type,
+    ms.record_date,
+    ms.date_created,
+    ms.last_updated,
+
+    ms.measurement_pk,
+    ms.measurementsample_pk,
+    ms.context_id,
+    ms.equipment_work_item_id,
+    ms.equipment_id,
+    ms.command_id,
+
+    e.nickname AS equipment_nickname,
+    e.serial_number AS equipment_serial_number,
+    et.name AS equipment_type_name,
+
+    dp.name AS data_packet_name,
+    SUBSTR(dp.data, 1, 1000) AS data_packet_data_snip,
+
+    df.display_order AS field_display_order,
+    df.name AS data_field_name,
+    df.field_type AS data_field_type,
+    df.series AS data_field_series,
+    df.is_sample_id,
+    df.is_group_by,
+    df.required,
+    df.data AS data_field_data,
+    u.name AS unit_name,
+
+    SUBSTR(ms.info, 1, 2000) AS measurement_info_snip,
+    SUBSTR(ms.raw_data, 1, 1000) AS raw_data_snip,
+    CASE
+        WHEN ms.raw_data_long_text IS NOT NULL
+        THEN DBMS_LOB.SUBSTR(ms.raw_data_long_text, 2000, 1)
+    END AS raw_data_long_text_snip,
+
+    ewi.state AS work_item_state,
+    ewi.work_item_identifier,
+    SUBSTR(ewi.additional_context, 1, 2000) AS work_item_additional_context,
+    SUBSTR(ewi.file_references, 1, 2000) AS work_item_file_references,
+    ewi.last_parse_result
+
+FROM measurement_scope ms
+LEFT JOIN res_equipment e
+    ON e.id = ms.equipment_id
+LEFT JOIN res_equipment_type et
+    ON et.id = e.equipment_type_id
+LEFT JOIN res_data_packet dp
+    ON dp.id = et.data_packet_id
+LEFT JOIN res_data_field df
+    ON df.data_packet_id = dp.id
+LEFT JOIN cor_unit u
+    ON u.id = df.unit_id
+LEFT JOIN res_equipment_work_item ewi
+    ON ewi.id = ms.equipment_work_item_id
+ORDER BY
+    ms.target_sample,
+    ms.record_date,
+    ms.row_index,
+    df.display_order NULLS LAST,
+    df.name;
