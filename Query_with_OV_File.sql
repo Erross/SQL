@@ -4,11 +4,11 @@ WITH
 
     Known fixes included:
       1. REQ_TASK.TASK_NAME is carried in task_map for diagnostics/future filtering.
-      2. Machine rows now require real process context: project name and project plan must resolve.
+      2. Machine rows require real process context: project name and project plan must resolve.
          This removes TP247 / QAP_OVEN_PROCESS style rows without filtering out planned samples generally.
-      3. Equipment packet sample_id is trusted first when assigning machine rows to samples.
-         The TP009 diagnostic showed sample_id is present in VALUE_TEXT and row order can be wrong.
-      4. Task sample-list item_index and RES_MEASUREMENTSAMPLE.row_index are now fallback mappings only.
+      3. Sample ID is cardinal. The instrument/packet sample_id can be manually changed and is not trusted
+         for assigning the business/result sample. Equipment rows now prefer task sample_list item_index first.
+      4. RES_MEASUREMENTSAMPLE.row_index is second fallback. Packet/instrument sample_id is last fallback only.
       5. CSV/file fallback rows are also gated to a valid process context so helper/batch measurements do not leak back in.
 */
 
@@ -557,40 +557,52 @@ equipment_resolved AS (
         ewc.unit_id,
         ewc.source_position,
 
+        /*
+            Sample ID is cardinal for reporting.
+            The packet/instrument sample_id can be manually changed in OneLab and is not reliable
+            for assigning the business/result sample.
+
+            Resolution priority:
+              1. Task sample_list item_index: matches the Sample ID (Name) column shown on the task screen.
+              2. RES_MEASUREMENTSAMPLE row_index: secondary structural fallback.
+              3. Packet/instrument sample_id: last fallback only, never allowed to override the task sample.
+        */
         COALESCE(
-            s_packet.id,
             s_fb_task.id,
-            s_fb_idx.id
+            s_fb_idx.id,
+            s_packet.id
         ) AS sample_raw_id,
 
         COALESCE(
-            s_packet.sample_id,
             s_fb_task.sample_id,
-            s_fb_idx.sample_id
+            s_fb_idx.sample_id,
+            s_packet.sample_id
         ) AS sample_id
 
     FROM equipment_with_context ewc
-    LEFT JOIN hub_owner.sam_sample s_packet
-        ON s_packet.sample_id = ewc.packet_sample_id
 
-    /* Best mapping: the equipment packet's own sample_id.
-       TP009/T039 proved item_index order can be different from task sample_list order. */
+    /* 1. Primary mapping: task sample_list position / business Sample ID. */
     LEFT JOIN task_samples ts_fb
         ON ts_fb.proc_exec_id = ewc.proc_exec_id
        AND ts_fb.item_index = ewc.item_index
-       AND s_packet.id IS NULL
     LEFT JOIN hub_owner.sam_sample s_fb_task
         ON s_fb_task.sample_id = ts_fb.sample_id
-       AND s_packet.id IS NULL
 
+    /* 2. Secondary fallback: measurement-sample row index, only when task-position mapping failed. */
     LEFT JOIN fallback_measurements fm_idx
         ON fm_idx.context_id = ewc.context_id
        AND fm_idx.derived_item_index = ewc.item_index
-       AND s_packet.id IS NULL
        AND s_fb_task.id IS NULL
     LEFT JOIN hub_owner.sam_sample s_fb_idx
         ON s_fb_idx.id = fm_idx.mapped_sample_id
-),
+       AND s_fb_task.id IS NULL
+
+    /* 3. Last fallback only: packet/instrument sample_id. */
+    LEFT JOIN hub_owner.sam_sample s_packet
+        ON s_packet.sample_id = ewc.packet_sample_id
+       AND s_fb_task.id IS NULL
+       AND s_fb_idx.id IS NULL
+)
 
 manual_results AS (
     SELECT
