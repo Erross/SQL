@@ -651,7 +651,7 @@ manual_results AS (
       AND cs.id = '5FD74EE88C024C2EB908BCE0E176B0E8'
 ),
 
-equipment_results AS (
+equipment_results_raw AS (
     SELECT
         s.name AS "Sample Name",
         s.sample_id AS "Sample ID",
@@ -675,7 +675,7 @@ equipment_results AS (
         proj.name AS "Task Plan Project",
         runset.runset_id AS "Task Plan ID",
         runset.date_created AS "Task Plan Creation Date",
-        ts.task_status AS "Task Status",
+        tm.task_status AS "Task Status",
         er.field_name AS "Characteristic",
         TO_CHAR(er.value_numeric) AS "Result",
         COALESCE(
@@ -690,15 +690,11 @@ equipment_results AS (
         rp.tp_project_plan AS "Task Plan Project Plan"
 
     FROM equipment_resolved er
-    JOIN task_samples ts
-        ON ts.proc_exec_id = er.proc_exec_id
-       AND ts.sample_id = er.sample_id
-       AND ts.item_index = er.item_index
+    JOIN task_map tm
+        ON tm.proc_exec_id = er.proc_exec_id
     JOIN sample_exec_status ses
-        ON ses.proc_exec_id = ts.proc_exec_id
-       AND ses.task_raw_id = ts.task_raw_id
-       AND ses.item_index = ts.item_index
-       AND ses.sample_id = ts.sample_id
+        ON ses.sample_id = er.sample_id
+       AND ses.proc_exec_id = tm.proc_exec_id
     JOIN hub_owner.sam_sample s
         ON s.id = er.sample_raw_id
     LEFT JOIN hub_owner.sam_sample ms
@@ -708,7 +704,7 @@ equipment_results AS (
     LEFT JOIN sample_properties sp
         ON sp.sample_raw_id = s.id
     LEFT JOIN hub_owner.req_runset runset
-        ON ts.runset_id = runset.id
+        ON tm.runset_id = runset.id
     LEFT JOIN hub_owner.res_project proj
         ON runset.project_id = proj.id
     LEFT JOIN runset_properties rp
@@ -723,6 +719,71 @@ equipment_results AS (
     WHERE cs.id = '5FD74EE88C024C2EB908BCE0E176B0E8'
       AND ms.sample_id != 'planned'
       AND er.value_numeric IS NOT NULL
+),
+
+/* Local dedupe only on equipment rows.
+   This removes the row multiplication caused by the loose status join,
+   without doing a global DISTINCT over manual + equipment + file rows. */
+equipment_results AS (
+    SELECT
+        "Sample Name",
+        "Sample ID",
+        "Sample Status",
+        "Master Sample ID",
+        "Sampling point",
+        "Sampling point description",
+        "LINE-1",
+        "Owner",
+        "Product Code",
+        "Product Description",
+        "CIG_PRODUCT_CODE",
+        "CIG_PRODUCT_DESCRIPTION",
+        "Spec_Group",
+        "Task Plan Project",
+        "Task Plan ID",
+        "Task Plan Creation Date",
+        "Task Status",
+        "Characteristic",
+        "Result",
+        "Formatted result",
+        "Result entered",
+        "Result Source",
+        "UOM",
+        "Task Plan Project Plan"
+    FROM equipment_results_raw
+    GROUP BY
+        "Sample Name",
+        "Sample ID",
+        "Sample Status",
+        "Master Sample ID",
+        "Sampling point",
+        "Sampling point description",
+        "LINE-1",
+        "Owner",
+        "Product Code",
+        "Product Description",
+        "CIG_PRODUCT_CODE",
+        "CIG_PRODUCT_DESCRIPTION",
+        "Spec_Group",
+        "Task Plan Project",
+        "Task Plan ID",
+        "Task Plan Creation Date",
+        "Task Status",
+        "Characteristic",
+        "Result",
+        "Formatted result",
+        "Result entered",
+        "Result Source",
+        "UOM",
+        "Task Plan Project Plan"
+),
+
+existing_equipment_ov_samples AS (
+    SELECT
+        "Sample ID"
+    FROM equipment_results
+    WHERE LOWER("Characteristic") = 'ov_meter_reading'
+    GROUP BY "Sample ID"
 ),
 
 equipment_file_packet_scope AS (
@@ -762,12 +823,14 @@ equipment_file_packet_scope AS (
     JOIN hub_owner.res_data_field df_ov
         ON df_ov.data_packet_id = dp.id
        AND UPPER(REPLACE(df_ov.name, ' ', '_')) = 'OV_METER_READING'
+    LEFT JOIN existing_equipment_ov_samples existing_ov
+        ON existing_ov."Sample ID" = s.sample_id
     WHERE rm.measurement_type = 'Data Packet'
       AND rm.record_name IS NOT NULL
       AND LOWER(rm.record_name) LIKE '%.csv'
-      AND dp.name = 'Moisture Meter'
       AND rms.sample_id IS NOT NULL
       AND rms.sample_id <> s.sample_id
+      AND existing_ov."Sample ID" IS NULL
 ),
 
 equipment_file_text AS (
@@ -876,7 +939,7 @@ equipment_file_extracted AS (
     WHERE ml.matched_line IS NOT NULL
 ),
 
-equipment_file_values AS (
+equipment_file_values_raw AS (
     SELECT
         efe.sample_raw_id,
         efe.sample_name,
@@ -907,6 +970,44 @@ equipment_file_values AS (
     FROM equipment_file_extracted efe
     WHERE efe.csv_sample_id = efe.instrument_sample_id
       AND REGEXP_LIKE(efe.csv_ov_meter_reading, '^-?[0-9]+(\.[0-9]+)?$')
+),
+
+/* Local dedupe for file rows only. Keeps distinct recovered values,
+   but removes exact repeat matches caused by duplicate file metadata or joins. */
+equipment_file_values AS (
+    SELECT
+        sample_raw_id,
+        sample_name,
+        sample_id,
+        instrument_sample_id,
+        measurementsample_raw_id,
+        measurement_raw_id,
+        record_name,
+        record_date,
+        measurement_created,
+        measurement_last_updated,
+        csv_data_id,
+        csv_sample_id,
+        csv_meter_number,
+        csv_sampling_point_time,
+        ov_meter_reading
+    FROM equipment_file_values_raw
+    GROUP BY
+        sample_raw_id,
+        sample_name,
+        sample_id,
+        instrument_sample_id,
+        measurementsample_raw_id,
+        measurement_raw_id,
+        record_name,
+        record_date,
+        measurement_created,
+        measurement_last_updated,
+        csv_data_id,
+        csv_sample_id,
+        csv_meter_number,
+        csv_sampling_point_time,
+        ov_meter_reading
 ),
 
 equipment_file_results AS (
