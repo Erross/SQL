@@ -984,11 +984,70 @@ equipment_file_results AS (
         sp.cig_product_description AS "CIG_PRODUCT_DESCRIPTION",
         sp.spec_group AS "Spec_Group",
 
-        CAST(NULL AS VARCHAR2(255)) AS "Task Plan Project",
-        CAST(NULL AS VARCHAR2(255)) AS "Task Plan ID",
-        CAST(NULL AS DATE) AS "Task Plan Creation Date",
+        (
+            SELECT MAX(proj2.name) KEEP (
+                DENSE_RANK FIRST ORDER BY
+                    CASE
+                        WHEN rs2.date_created <= NVL(f.measurement_last_updated, SYSDATE) THEN 0
+                        ELSE 1
+                    END,
+                    rs2.date_created DESC
+            )
+            FROM task_samples ts2
+            JOIN hub_owner.req_runset rs2
+                ON rs2.id = ts2.runset_id
+            LEFT JOIN hub_owner.res_project proj2
+                ON proj2.id = rs2.project_id
+            WHERE ts2.sample_id = s.sample_id
+        ) AS "Task Plan Project",
 
-        s.life_cycle_state AS "Task Status",
+        (
+            SELECT MAX(rs2.runset_id) KEEP (
+                DENSE_RANK FIRST ORDER BY
+                    CASE
+                        WHEN rs2.date_created <= NVL(f.measurement_last_updated, SYSDATE) THEN 0
+                        ELSE 1
+                    END,
+                    rs2.date_created DESC
+            )
+            FROM task_samples ts2
+            JOIN hub_owner.req_runset rs2
+                ON rs2.id = ts2.runset_id
+            WHERE ts2.sample_id = s.sample_id
+        ) AS "Task Plan ID",
+
+        (
+            SELECT MAX(rs2.date_created) KEEP (
+                DENSE_RANK FIRST ORDER BY
+                    CASE
+                        WHEN rs2.date_created <= NVL(f.measurement_last_updated, SYSDATE) THEN 0
+                        ELSE 1
+                    END,
+                    rs2.date_created DESC
+            )
+            FROM task_samples ts2
+            JOIN hub_owner.req_runset rs2
+                ON rs2.id = ts2.runset_id
+            WHERE ts2.sample_id = s.sample_id
+        ) AS "Task Plan Creation Date",
+
+        COALESCE(
+            (
+                SELECT MAX(ts2.task_status) KEEP (
+                    DENSE_RANK FIRST ORDER BY
+                        CASE
+                            WHEN rs2.date_created <= NVL(f.measurement_last_updated, SYSDATE) THEN 0
+                            ELSE 1
+                        END,
+                        rs2.date_created DESC
+                )
+                FROM task_samples ts2
+                JOIN hub_owner.req_runset rs2
+                    ON rs2.id = ts2.runset_id
+                WHERE ts2.sample_id = s.sample_id
+            ),
+            s.life_cycle_state
+        ) AS "Task Status",
 
         'ov_meter_reading' AS "Characteristic",
 
@@ -1006,7 +1065,22 @@ equipment_file_results AS (
 
         'percent' AS "UOM",
 
-        CAST(NULL AS VARCHAR2(255)) AS "Task Plan Project Plan"
+        (
+            SELECT MAX(rp2.tp_project_plan) KEEP (
+                DENSE_RANK FIRST ORDER BY
+                    CASE
+                        WHEN rs2.date_created <= NVL(f.measurement_last_updated, SYSDATE) THEN 0
+                        ELSE 1
+                    END,
+                    rs2.date_created DESC
+            )
+            FROM task_samples ts2
+            JOIN hub_owner.req_runset rs2
+                ON rs2.id = ts2.runset_id
+            LEFT JOIN runset_properties rp2
+                ON rp2.runset_raw_id = rs2.id
+            WHERE ts2.sample_id = s.sample_id
+        ) AS "Task Plan Project Plan"
 
     FROM equipment_file_values f
     JOIN hub_owner.sam_sample s
