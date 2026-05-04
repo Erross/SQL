@@ -721,9 +721,6 @@ equipment_results_raw AS (
       AND er.value_numeric IS NOT NULL
 ),
 
-/* Local dedupe only on equipment rows.
-   This removes the row multiplication caused by the loose status join,
-   without doing a global DISTINCT over manual + equipment + file rows. */
 equipment_results AS (
     SELECT
         "Sample Name",
@@ -799,6 +796,10 @@ equipment_file_packet_scope AS (
 
         rm.id AS measurement_raw_id,
         rm.record_name,
+        CASE
+            WHEN INSTR(rm.record_name, '/') > 0
+            THEN SUBSTR(rm.record_name, INSTR(rm.record_name, '/', -1) + 1)
+        END AS record_basename_after_slash,
         rm.record_date,
         rm.date_created AS measurement_created,
         rm.last_updated AS measurement_last_updated,
@@ -848,132 +849,76 @@ equipment_file_text AS (
 
     FROM equipment_file_packet_scope ps
     JOIN hub_owner.file_metadata fm
-        ON fm.name = ps.record_name
-       AND fm.storage_type = 'DATABASE'
+        ON fm.storage_type = 'DATABASE'
+       AND (
+              fm.name = ps.record_name
+           OR (
+                  ps.record_basename_after_slash IS NOT NULL
+              AND fm.name = ps.record_basename_after_slash
+           )
+       )
     JOIN hub_owner.file_content fc
         ON fc.file_id = fm.id
     WHERE DBMS_LOB.GETLENGTH(fc.content) <= 4000
 ),
 
-equipment_file_matched_line AS (
+equipment_file_values_raw AS (
     SELECT
-        eft.*,
+        eft.sample_raw_id,
+        eft.sample_name,
+        eft.sample_id,
+        eft.instrument_sample_id,
+        eft.measurementsample_raw_id,
+        eft.measurement_raw_id,
+        eft.record_name,
+        eft.record_date,
+        eft.measurement_created,
+        eft.measurement_last_updated,
+        eft.file_metadata_id,
+        eft.file_name,
+        eft.file_size,
+        eft.file_date_created,
+        eft.file_last_updated,
 
         REGEXP_SUBSTR(
             eft.file_text,
-            '(^|' || CHR(10) || ')[^' || CHR(10) || CHR(13) || ']*,' ||
-                eft.instrument_sample_id ||
-            ',[^' || CHR(10) || CHR(13) || ']*',
+            'Data,[^,]*,([^,]*),' || eft.instrument_sample_id || ',',
             1,
             1,
-            'm'
-        ) AS matched_line
+            'i',
+            1
+        ) AS csv_data_id,
+
+        eft.instrument_sample_id AS csv_sample_id,
+
+        REGEXP_SUBSTR(
+            eft.file_text,
+            'Data,[^,]*,[^,]*,' || eft.instrument_sample_id || ',([^,]*),',
+            1,
+            1,
+            'i',
+            1
+        ) AS csv_meter_number,
+
+        REGEXP_SUBSTR(
+            eft.file_text,
+            'Data,[^,]*,[^,]*,' || eft.instrument_sample_id || ',[^,]*,(-?[0-9]+(\.[0-9]+)?)',
+            1,
+            1,
+            'i',
+            1
+        ) AS csv_ov_meter_reading,
+
+        CAST(NULL AS VARCHAR2(255)) AS csv_sampling_point_time
 
     FROM equipment_file_text eft
+    WHERE REGEXP_LIKE(
+        eft.file_text,
+        'Data,[^,]*,[^,]*,' || eft.instrument_sample_id || ',[^,]*,-?[0-9]+(\.[0-9]+)?',
+        'i'
+    )
 ),
 
-equipment_file_extracted AS (
-    SELECT
-        ml.sample_raw_id,
-        ml.sample_name,
-        ml.sample_id,
-        ml.instrument_sample_id,
-        ml.measurementsample_raw_id,
-        ml.measurement_raw_id,
-        ml.record_name,
-        ml.record_date,
-        ml.measurement_created,
-        ml.measurement_last_updated,
-        ml.file_metadata_id,
-        ml.file_name,
-        ml.file_size,
-        ml.file_date_created,
-        ml.file_last_updated,
-
-        TRIM(REGEXP_SUBSTR(
-            REPLACE(REPLACE(ml.matched_line, CHR(10), ''), CHR(13), ''),
-            '(^|,)([^,]*)',
-            1,
-            3,
-            NULL,
-            2
-        )) AS csv_data_id,
-
-        TRIM(REGEXP_SUBSTR(
-            REPLACE(REPLACE(ml.matched_line, CHR(10), ''), CHR(13), ''),
-            '(^|,)([^,]*)',
-            1,
-            4,
-            NULL,
-            2
-        )) AS csv_sample_id,
-
-        TRIM(REGEXP_SUBSTR(
-            REPLACE(REPLACE(ml.matched_line, CHR(10), ''), CHR(13), ''),
-            '(^|,)([^,]*)',
-            1,
-            5,
-            NULL,
-            2
-        )) AS csv_meter_number,
-
-        TRIM(REGEXP_SUBSTR(
-            REPLACE(REPLACE(ml.matched_line, CHR(10), ''), CHR(13), ''),
-            '(^|,)([^,]*)',
-            1,
-            6,
-            NULL,
-            2
-        )) AS csv_ov_meter_reading,
-
-        TRIM(REGEXP_SUBSTR(
-            REPLACE(REPLACE(ml.matched_line, CHR(10), ''), CHR(13), ''),
-            '(^|,)([^,]*)',
-            1,
-            7,
-            NULL,
-            2
-        )) AS csv_sampling_point_time
-
-    FROM equipment_file_matched_line ml
-    WHERE ml.matched_line IS NOT NULL
-),
-
-equipment_file_values_raw AS (
-    SELECT
-        efe.sample_raw_id,
-        efe.sample_name,
-        efe.sample_id,
-        efe.instrument_sample_id,
-        efe.measurementsample_raw_id,
-        efe.measurement_raw_id,
-        efe.record_name,
-        efe.record_date,
-        efe.measurement_created,
-        efe.measurement_last_updated,
-        efe.file_metadata_id,
-        efe.file_name,
-        efe.file_size,
-        efe.file_date_created,
-        efe.file_last_updated,
-        efe.csv_data_id,
-        efe.csv_sample_id,
-        efe.csv_meter_number,
-        efe.csv_sampling_point_time,
-
-        TO_NUMBER(
-            efe.csv_ov_meter_reading,
-            '9999999990D999999',
-            'NLS_NUMERIC_CHARACTERS=.,'
-        ) AS ov_meter_reading
-
-    FROM equipment_file_extracted efe
-    WHERE efe.csv_sample_id = efe.instrument_sample_id
-      AND REGEXP_LIKE(efe.csv_ov_meter_reading, '^-?[0-9]+(\.[0-9]+)?$')
-),
-
-/* Local dedupe for file rows only. Keeps distinct recovered values,
-   but removes exact repeat matches caused by duplicate file metadata or joins. */
 equipment_file_values AS (
     SELECT
         sample_raw_id,
@@ -990,8 +935,15 @@ equipment_file_values AS (
         csv_sample_id,
         csv_meter_number,
         csv_sampling_point_time,
-        ov_meter_reading
+
+        TO_NUMBER(
+            csv_ov_meter_reading,
+            '9999999990D999999',
+            'NLS_NUMERIC_CHARACTERS=.,'
+        ) AS ov_meter_reading
+
     FROM equipment_file_values_raw
+    WHERE REGEXP_LIKE(csv_ov_meter_reading, '^-?[0-9]+(\.[0-9]+)?$')
     GROUP BY
         sample_raw_id,
         sample_name,
@@ -1007,7 +959,7 @@ equipment_file_values AS (
         csv_sample_id,
         csv_meter_number,
         csv_sampling_point_time,
-        ov_meter_reading
+        csv_ov_meter_reading
 ),
 
 equipment_file_results AS (
