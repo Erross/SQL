@@ -451,180 +451,6 @@ equipment_resolved AS (
        AND s_fb_single.id IS NULL
 ),
 
-/* ============================================================
-   NEW OV METER FILE-CONTENT PATH
-
-   This recovers OV_Meter_Reading from uploaded equipment CSVs.
-
-   Mapping:
-       final sample:
-           hub_owner.sam_sample.id
-       to packet row:
-           hub_owner.res_measurementsample.mapped_sample_id
-       to instrument CSV sample:
-           hub_owner.res_measurementsample.sample_id
-       to file:
-           hub_owner.res_measurement.record_name = hub_owner.file_metadata.name
-       to value:
-           FILE_CONTENT CSV Sample_Id = RES_MEASUREMENTSAMPLE.SAMPLE_ID
-           FILE_CONTENT CSV OV_Meter_Reading = report Result
-   ============================================================ */
-
-equipment_file_packet_scope AS (
-    SELECT DISTINCT
-        s.id AS sample_raw_id,
-        s.name AS sample_name,
-        s.sample_id AS sample_id,
-
-        rms.id AS measurementsample_raw_id,
-        rms.sample_id AS instrument_sample_id,
-        rms.row_index,
-        rms.context_id,
-
-        rm.id AS measurement_raw_id,
-        rm.record_name,
-        rm.record_date,
-        rm.date_created AS measurement_created,
-        rm.last_updated AS measurement_last_updated,
-        rm.equipment_id,
-        rm.equipment_work_item_id,
-
-        et.name AS equipment_type_name,
-        dp.id AS data_packet_id,
-        dp.name AS data_packet_name
-
-    FROM hub_owner.sam_sample s
-    JOIN hub_owner.res_measurementsample rms
-        ON rms.mapped_sample_id = s.id
-    JOIN hub_owner.res_measurement rm
-        ON rm.id = rms.measurement_id
-    JOIN hub_owner.res_equipment e
-        ON e.id = rm.equipment_id
-    JOIN hub_owner.res_equipment_type et
-        ON et.id = e.equipment_type_id
-    JOIN hub_owner.res_data_packet dp
-        ON dp.id = et.data_packet_id
-    JOIN hub_owner.res_data_field df_ov
-        ON df_ov.data_packet_id = dp.id
-       AND UPPER(REPLACE(df_ov.name, ' ', '_')) = 'OV_METER_READING'
-    WHERE rm.measurement_type = 'Data Packet'
-      AND rm.record_name IS NOT NULL
-      AND rms.sample_id IS NOT NULL
-      AND LOWER(rm.record_name) LIKE '%.csv'
-),
-
-equipment_file_text AS (
-    SELECT
-        ps.*,
-        fm.id AS file_metadata_id,
-        fm.name AS file_name,
-        fm.file_size,
-        fm.date_created AS file_date_created,
-        fm.last_updated AS file_last_updated,
-
-        UTL_RAW.CAST_TO_VARCHAR2(
-            DBMS_LOB.SUBSTR(fc.content, 4000, 1)
-        ) AS file_text
-
-    FROM equipment_file_packet_scope ps
-    JOIN hub_owner.file_metadata fm
-        ON fm.name = ps.record_name
-       AND fm.storage_type = 'DATABASE'
-    JOIN hub_owner.file_content fc
-        ON fc.file_id = fm.id
-    WHERE DBMS_LOB.GETLENGTH(fc.content) <= 4000
-),
-
-numbers AS (
-    SELECT LEVEL AS n
-    FROM dual
-    CONNECT BY LEVEL <= 200
-),
-
-equipment_file_csv_lines AS (
-    SELECT
-        eft.*,
-        n.n AS line_no,
-        TRIM(
-            REPLACE(
-                REGEXP_SUBSTR(
-                    eft.file_text,
-                    '[^' || CHR(10) || ']+',
-                    1,
-                    n.n
-                ),
-                CHR(13),
-                ''
-            )
-        ) AS line_text
-    FROM equipment_file_text eft
-    JOIN numbers n
-        ON n.n <= REGEXP_COUNT(eft.file_text, CHR(10)) + 1
-),
-
-equipment_file_csv_parsed AS (
-    SELECT
-        cl.*,
-
-        TRIM(REGEXP_SUBSTR(cl.line_text, '(^|,)([^,]*)', 1, 1, NULL, 2)) AS csv_group_name,
-        TRIM(REGEXP_SUBSTR(cl.line_text, '(^|,)([^,]*)', 1, 2, NULL, 2)) AS csv_number_in_group,
-        TRIM(REGEXP_SUBSTR(cl.line_text, '(^|,)([^,]*)', 1, 3, NULL, 2)) AS csv_data_id,
-        TRIM(REGEXP_SUBSTR(cl.line_text, '(^|,)([^,]*)', 1, 4, NULL, 2)) AS csv_sample_id,
-        TRIM(REGEXP_SUBSTR(cl.line_text, '(^|,)([^,]*)', 1, 5, NULL, 2)) AS csv_meter_number,
-        TRIM(REGEXP_SUBSTR(cl.line_text, '(^|,)([^,]*)', 1, 6, NULL, 2)) AS csv_ov_meter_reading,
-        TRIM(REGEXP_SUBSTR(cl.line_text, '(^|,)([^,]*)', 1, 7, NULL, 2)) AS csv_sampling_point_time
-
-    FROM equipment_file_csv_lines cl
-    WHERE cl.line_no > 1
-),
-
-equipment_file_values AS (
-    SELECT
-        p.sample_raw_id,
-        p.sample_name,
-        p.sample_id,
-        p.instrument_sample_id,
-        p.measurementsample_raw_id,
-        p.measurement_raw_id,
-        p.record_name,
-        p.record_date,
-        p.measurement_created,
-        p.measurement_last_updated,
-        p.file_metadata_id,
-        p.file_name,
-        p.file_size,
-        p.file_date_created,
-        p.file_last_updated,
-        p.csv_data_id,
-        p.csv_meter_number,
-        p.csv_sampling_point_time,
-
-        TO_NUMBER(
-            p.csv_ov_meter_reading,
-            '9999999990D999999',
-            'NLS_NUMERIC_CHARACTERS=.,'
-        ) AS ov_meter_reading,
-
-        ROW_NUMBER() OVER (
-            PARTITION BY p.sample_id
-            ORDER BY
-                p.measurement_last_updated DESC NULLS LAST,
-                p.file_last_updated DESC NULLS LAST,
-                p.file_date_created DESC NULLS LAST,
-                TO_NUMBER(
-                    CASE
-                        WHEN REGEXP_LIKE(p.csv_data_id, '^[0-9]+$')
-                        THEN p.csv_data_id
-                    END
-                ) DESC NULLS LAST
-        ) AS rn
-
-    FROM equipment_file_csv_parsed p
-    WHERE p.csv_group_name = 'Data'
-      AND p.csv_sample_id = p.instrument_sample_id
-      AND REGEXP_LIKE(p.csv_ov_meter_reading, '^-?[0-9]+(\.[0-9]+)?$')
-),
-
 manual_results AS (
     SELECT
         s.name AS "Sample Name",
@@ -770,88 +596,7 @@ equipment_results AS (
       AND er.value_numeric IS NOT NULL
 ),
 
-existing_report_anchor AS (
-    SELECT *
-    FROM (
-        SELECT
-            r.*,
-            ROW_NUMBER() OVER (
-                PARTITION BY r."Sample ID"
-                ORDER BY
-                    CASE
-                        WHEN LOWER(r."Characteristic") = 'ov meter deviation' THEN 1
-                        WHEN LOWER(r."Characteristic") = 'dish difference' THEN 2
-                        WHEN LOWER(r."Characteristic") = 'dish average' THEN 3
-                        ELSE 9
-                    END,
-                    r."Result entered" DESC NULLS LAST
-            ) AS anchor_rn
-        FROM (
-            SELECT * FROM manual_results
-            UNION ALL
-            SELECT * FROM equipment_results
-        ) r
-        WHERE LOWER(r."Characteristic") IN (
-            'ov meter deviation',
-            'dish difference',
-            'dish average'
-        )
-    )
-    WHERE anchor_rn = 1
-),
-
-equipment_file_results AS (
-    SELECT
-        a."Sample Name" AS "Sample Name",
-        a."Sample ID" AS "Sample ID",
-        a."Sample Status" AS "Sample Status",
-        a."Master Sample ID" AS "Master Sample ID",
-        a."Sampling point" AS "Sampling point",
-        a."Sampling point description" AS "Sampling point description",
-        a."LINE-1" AS "LINE-1",
-        a."Owner" AS "Owner",
-        a."Product Code" AS "Product Code",
-        a."Product Description" AS "Product Description",
-        a."CIG_PRODUCT_CODE" AS "CIG_PRODUCT_CODE",
-        a."CIG_PRODUCT_DESCRIPTION" AS "CIG_PRODUCT_DESCRIPTION",
-        a."Spec_Group" AS "Spec_Group",
-        a."Task Plan Project" AS "Task Plan Project",
-        a."Task Plan ID" AS "Task Plan ID",
-        a."Task Plan Creation Date" AS "Task Plan Creation Date",
-        a."Task Status" AS "Task Status",
-
-        'ov_meter_reading' AS "Characteristic",
-
-        TO_CHAR(f.ov_meter_reading) AS "Result",
-
-        TO_CHAR(
-            f.ov_meter_reading,
-            'FM9999999990.0000',
-            'NLS_NUMERIC_CHARACTERS=.,'
-        ) AS "Formatted result",
-
-        f.measurement_last_updated AS "Result entered",
-
-        'EQUIPMENT' AS "Result Source",
-
-        'percent' AS "UOM",
-
-        a."Task Plan Project Plan" AS "Task Plan Project Plan"
-
-    FROM equipment_file_values f
-    JOIN existing_report_anchor a
-        ON a."Sample ID" = f.sample_id
-    WHERE f.rn = 1
-      AND NOT EXISTS (
-          SELECT 1
-          FROM equipment_results er
-          WHERE er."Sample ID" = f.sample_id
-            AND LOWER(er."Characteristic") = 'ov_meter_reading'
-      )
-)
-
-SELECT DISTINCT *
-FROM (
+base_results AS (
     SELECT
         "Sample Name",
         "Sample ID",
@@ -907,33 +652,310 @@ FROM (
         "UOM",
         "Task Plan Project Plan"
     FROM equipment_results
+),
 
-    UNION ALL
-
+missing_ov_samples AS (
     SELECT
-        "Sample Name",
-        "Sample ID",
-        "Sample Status",
-        "Master Sample ID",
-        "Sampling point",
-        "Sampling point description",
-        "LINE-1",
-        "Owner",
-        "Product Code",
-        "Product Description",
-        "CIG_PRODUCT_CODE",
-        "CIG_PRODUCT_DESCRIPTION",
-        "Spec_Group",
-        "Task Plan Project",
-        "Task Plan ID",
-        "Task Plan Creation Date",
-        "Task Status",
-        "Characteristic",
-        "Result",
-        "Formatted result",
-        "Result entered",
-        "Result Source",
-        "UOM",
-        "Task Plan Project Plan"
-    FROM equipment_file_results
-);
+        br."Sample ID"
+    FROM base_results br
+    GROUP BY br."Sample ID"
+    HAVING
+        SUM(CASE
+            WHEN LOWER(br."Characteristic") = 'ov_meter_reading'
+            THEN 1 ELSE 0
+        END) = 0
+        AND
+        SUM(CASE
+            WHEN LOWER(br."Characteristic") IN (
+                'ov meter deviation',
+                'dish difference',
+                'dish average'
+            )
+            THEN 1 ELSE 0
+        END) > 0
+),
+
+existing_report_anchor AS (
+    SELECT *
+    FROM (
+        SELECT
+            br.*,
+            ROW_NUMBER() OVER (
+                PARTITION BY br."Sample ID"
+                ORDER BY
+                    CASE
+                        WHEN LOWER(br."Characteristic") = 'ov meter deviation' THEN 1
+                        WHEN LOWER(br."Characteristic") = 'dish difference' THEN 2
+                        WHEN LOWER(br."Characteristic") = 'dish average' THEN 3
+                        ELSE 9
+                    END,
+                    br."Result entered" DESC NULLS LAST
+            ) AS anchor_rn
+        FROM base_results br
+        JOIN missing_ov_samples mos
+            ON mos."Sample ID" = br."Sample ID"
+        WHERE LOWER(br."Characteristic") IN (
+            'ov meter deviation',
+            'dish difference',
+            'dish average'
+        )
+    )
+    WHERE anchor_rn = 1
+),
+
+equipment_file_packet_scope AS (
+    SELECT DISTINCT
+        s.id AS sample_raw_id,
+        s.name AS sample_name,
+        s.sample_id AS sample_id,
+
+        rms.id AS measurementsample_raw_id,
+        rms.sample_id AS instrument_sample_id,
+        rms.row_index,
+        rms.context_id,
+
+        rm.id AS measurement_raw_id,
+        rm.record_name,
+        rm.record_date,
+        rm.date_created AS measurement_created,
+        rm.last_updated AS measurement_last_updated,
+        rm.equipment_id,
+        rm.equipment_work_item_id,
+
+        et.name AS equipment_type_name,
+        dp.id AS data_packet_id,
+        dp.name AS data_packet_name
+
+    FROM missing_ov_samples mos
+    JOIN hub_owner.sam_sample s
+        ON s.sample_id = mos."Sample ID"
+    JOIN hub_owner.res_measurementsample rms
+        ON rms.mapped_sample_id = s.id
+    JOIN hub_owner.res_measurement rm
+        ON rm.id = rms.measurement_id
+    JOIN hub_owner.res_equipment e
+        ON e.id = rm.equipment_id
+    JOIN hub_owner.res_equipment_type et
+        ON et.id = e.equipment_type_id
+    JOIN hub_owner.res_data_packet dp
+        ON dp.id = et.data_packet_id
+    JOIN hub_owner.res_data_field df_ov
+        ON df_ov.data_packet_id = dp.id
+       AND UPPER(REPLACE(df_ov.name, ' ', '_')) = 'OV_METER_READING'
+    WHERE rm.measurement_type = 'Data Packet'
+      AND rm.record_name IS NOT NULL
+      AND rms.sample_id IS NOT NULL
+      AND LOWER(rm.record_name) LIKE '%.csv'
+),
+
+equipment_file_text AS (
+    SELECT
+        ps.*,
+        fm.id AS file_metadata_id,
+        fm.name AS file_name,
+        fm.file_size,
+        fm.date_created AS file_date_created,
+        fm.last_updated AS file_last_updated,
+
+        UTL_RAW.CAST_TO_VARCHAR2(
+            DBMS_LOB.SUBSTR(fc.content, 4000, 1)
+        ) AS file_text
+
+    FROM equipment_file_packet_scope ps
+    JOIN hub_owner.file_metadata fm
+        ON fm.name = ps.record_name
+       AND fm.storage_type = 'DATABASE'
+    JOIN hub_owner.file_content fc
+        ON fc.file_id = fm.id
+    WHERE DBMS_LOB.GETLENGTH(fc.content) <= 4000
+),
+
+numbers AS (
+    SELECT LEVEL AS n
+    FROM dual
+    CONNECT BY LEVEL <= 200
+),
+
+equipment_file_csv_lines AS (
+    SELECT
+        eft.*,
+        n.n AS line_no,
+        TRIM(
+            REPLACE(
+                REGEXP_SUBSTR(
+                    eft.file_text,
+                    '[^' || CHR(10) || ']+',
+                    1,
+                    n.n
+                ),
+                CHR(13),
+                ''
+            )
+        ) AS line_text
+    FROM equipment_file_text eft
+    JOIN numbers n
+        ON n.n <= REGEXP_COUNT(eft.file_text, CHR(10)) + 1
+),
+
+equipment_file_csv_parsed AS (
+    SELECT
+        cl.*,
+
+        TRIM(REGEXP_SUBSTR(cl.line_text, '(^|,)([^,]*)', 1, 1, NULL, 2)) AS csv_group_name,
+        TRIM(REGEXP_SUBSTR(cl.line_text, '(^|,)([^,]*)', 1, 2, NULL, 2)) AS csv_number_in_group,
+        TRIM(REGEXP_SUBSTR(cl.line_text, '(^|,)([^,]*)', 1, 3, NULL, 2)) AS csv_data_id,
+        TRIM(REGEXP_SUBSTR(cl.line_text, '(^|,)([^,]*)', 1, 4, NULL, 2)) AS csv_sample_id,
+        TRIM(REGEXP_SUBSTR(cl.line_text, '(^|,)([^,]*)', 1, 5, NULL, 2)) AS csv_meter_number,
+        TRIM(REGEXP_SUBSTR(cl.line_text, '(^|,)([^,]*)', 1, 6, NULL, 2)) AS csv_ov_meter_reading,
+        TRIM(REGEXP_SUBSTR(cl.line_text, '(^|,)([^,]*)', 1, 7, NULL, 2)) AS csv_sampling_point_time
+
+    FROM equipment_file_csv_lines cl
+    WHERE cl.line_no > 1
+),
+
+equipment_file_values AS (
+    SELECT
+        p.sample_raw_id,
+        p.sample_name,
+        p.sample_id,
+        p.instrument_sample_id,
+        p.measurementsample_raw_id,
+        p.measurement_raw_id,
+        p.record_name,
+        p.record_date,
+        p.measurement_created,
+        p.measurement_last_updated,
+        p.file_metadata_id,
+        p.file_name,
+        p.file_size,
+        p.file_date_created,
+        p.file_last_updated,
+        p.csv_data_id,
+        p.csv_meter_number,
+        p.csv_sampling_point_time,
+
+        TO_NUMBER(
+            p.csv_ov_meter_reading,
+            '9999999990D999999',
+            'NLS_NUMERIC_CHARACTERS=.,'
+        ) AS ov_meter_reading,
+
+        ROW_NUMBER() OVER (
+            PARTITION BY p.sample_id
+            ORDER BY
+                p.measurement_last_updated DESC NULLS LAST,
+                p.file_last_updated DESC NULLS LAST,
+                p.file_date_created DESC NULLS LAST,
+                TO_NUMBER(
+                    CASE
+                        WHEN REGEXP_LIKE(p.csv_data_id, '^[0-9]+$')
+                        THEN p.csv_data_id
+                    END
+                ) DESC NULLS LAST
+        ) AS rn
+
+    FROM equipment_file_csv_parsed p
+    WHERE p.csv_group_name = 'Data'
+      AND p.csv_sample_id = p.instrument_sample_id
+      AND REGEXP_LIKE(p.csv_ov_meter_reading, '^-?[0-9]+(\.[0-9]+)?$')
+),
+
+equipment_file_results AS (
+    SELECT
+        a."Sample Name" AS "Sample Name",
+        a."Sample ID" AS "Sample ID",
+        a."Sample Status" AS "Sample Status",
+        a."Master Sample ID" AS "Master Sample ID",
+        a."Sampling point" AS "Sampling point",
+        a."Sampling point description" AS "Sampling point description",
+        a."LINE-1" AS "LINE-1",
+        a."Owner" AS "Owner",
+        a."Product Code" AS "Product Code",
+        a."Product Description" AS "Product Description",
+        a."CIG_PRODUCT_CODE" AS "CIG_PRODUCT_CODE",
+        a."CIG_PRODUCT_DESCRIPTION" AS "CIG_PRODUCT_DESCRIPTION",
+        a."Spec_Group" AS "Spec_Group",
+        a."Task Plan Project" AS "Task Plan Project",
+        a."Task Plan ID" AS "Task Plan ID",
+        a."Task Plan Creation Date" AS "Task Plan Creation Date",
+        a."Task Status" AS "Task Status",
+
+        'ov_meter_reading' AS "Characteristic",
+
+        TO_CHAR(f.ov_meter_reading) AS "Result",
+
+        TO_CHAR(
+            f.ov_meter_reading,
+            'FM9999999990.0000',
+            'NLS_NUMERIC_CHARACTERS=.,'
+        ) AS "Formatted result",
+
+        f.measurement_last_updated AS "Result entered",
+
+        'EQUIPMENT' AS "Result Source",
+
+        'percent' AS "UOM",
+
+        a."Task Plan Project Plan" AS "Task Plan Project Plan"
+
+    FROM equipment_file_values f
+    JOIN existing_report_anchor a
+        ON a."Sample ID" = f.sample_id
+    WHERE f.rn = 1
+)
+
+SELECT
+    "Sample Name",
+    "Sample ID",
+    "Sample Status",
+    "Master Sample ID",
+    "Sampling point",
+    "Sampling point description",
+    "LINE-1",
+    "Owner",
+    "Product Code",
+    "Product Description",
+    "CIG_PRODUCT_CODE",
+    "CIG_PRODUCT_DESCRIPTION",
+    "Spec_Group",
+    "Task Plan Project",
+    "Task Plan ID",
+    "Task Plan Creation Date",
+    "Task Status",
+    "Characteristic",
+    "Result",
+    "Formatted result",
+    "Result entered",
+    "Result Source",
+    "UOM",
+    "Task Plan Project Plan"
+FROM base_results
+
+UNION ALL
+
+SELECT
+    "Sample Name",
+    "Sample ID",
+    "Sample Status",
+    "Master Sample ID",
+    "Sampling point",
+    "Sampling point description",
+    "LINE-1",
+    "Owner",
+    "Product Code",
+    "Product Description",
+    "CIG_PRODUCT_CODE",
+    "CIG_PRODUCT_DESCRIPTION",
+    "Spec_Group",
+    "Task Plan Project",
+    "Task Plan ID",
+    "Task Plan Creation Date",
+    "Task Status",
+    "Characteristic",
+    "Result",
+    "Formatted result",
+    "Result entered",
+    "Result Source",
+    "UOM",
+    "Task Plan Project Plan"
+FROM equipment_file_results;
