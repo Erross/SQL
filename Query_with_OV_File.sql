@@ -1,9 +1,23 @@
 WITH
+/*
+    Query_with_OV_File - revised machine-result mapping
+
+    Changes from the current GitHub query:
+      1. req_task.task_name is carried in task_map.
+      2. OV_Batch task executions are excluded at the process-task map, not by sample status.
+      3. Equipment parameter rows prefer the exact task sample-list item_index mapping before falling back
+         to RES_MEASUREMENTSAMPLE context mapping. This is intended to fix S1/S2 style switches such as TP009.
+      4. RES_MEASUREMENTSAMPLE fallback uses its actual ROW_INDEX, not a generated ROW_NUMBER, so row gaps/order
+         do not silently remap samples.
+      5. CSV/file fallback machine rows are only allowed when the sample has a non-OV_Batch process task context.
+*/
+
 task_map AS (
     SELECT
         pe.id AS proc_exec_id,
         rt.id AS task_raw_id,
         rt.task_id,
+        rt.task_name,
         rt.runset_id,
         rt.sample_list,
         rt.life_cycle_state AS task_status
@@ -17,6 +31,8 @@ task_map AS (
             SUBSTR(RAWTOHEX(pe.id),21,12)
         ) || '%'
     WHERE rt.life_cycle_state IN ('released', 'completed')
+      AND NVL(rt.deleted, 'x') <> 'Y'
+      AND NVL(UPPER(rt.task_name), 'x') NOT LIKE 'OV_BATCH%'
 ),
 
 task_samples AS (
@@ -24,6 +40,7 @@ task_samples AS (
         tm.proc_exec_id,
         tm.task_raw_id,
         tm.task_id,
+        tm.task_name,
         tm.runset_id,
         tm.task_status,
         n.lvl - 1 AS item_index,
@@ -36,6 +53,12 @@ task_samples AS (
     ) n
         ON n.lvl <= REGEXP_COUNT(tm.sample_list, ',') + 1
     WHERE REGEXP_SUBSTR(tm.sample_list, '[^,]+', 1, n.lvl) IS NOT NULL
+),
+
+valid_process_samples AS (
+    SELECT DISTINCT
+        sample_id
+    FROM task_samples
 ),
 
 item_state_sample_flags AS (
@@ -479,7 +502,7 @@ equipment_rows AS (
         r.unit_id,
         r.source_position
     FROM equipment_row_metadata m
-    LEFT JOIN equipment_selected_result r
+    JOIN equipment_selected_result r
         ON r.proc_exec_id = m.proc_exec_id
        AND r.proc_elem_exec_id = m.proc_elem_exec_id
        AND r.item_index = m.item_index
@@ -506,12 +529,15 @@ equipment_with_context AS (
 fallback_measurements AS (
     SELECT
         meas_s.context_id,
-        meas_s.mapped_sample_id,
-        ROW_NUMBER() OVER (
-            PARTITION BY meas_s.context_id
-            ORDER BY meas_s.row_index, meas_s.id
-        ) - 1 AS derived_item_index
+        meas_s.row_index AS derived_item_index,
+        MAX(meas_s.mapped_sample_id) KEEP (
+            DENSE_RANK FIRST ORDER BY meas_s.id
+        ) AS mapped_sample_id
     FROM hub_owner.res_measurementsample meas_s
+    WHERE meas_s.row_index IS NOT NULL
+    GROUP BY
+        meas_s.context_id,
+        meas_s.row_index
 ),
 
 equipment_resolved AS (
@@ -533,45 +559,37 @@ equipment_resolved AS (
 
         COALESCE(
             s_packet.id,
-            s_fb_multi.id,
-            s_fb_single.id,
-            s_fb_task.id
+            s_fb_task.id,
+            s_fb_idx.id
         ) AS sample_raw_id,
 
         COALESCE(
             s_packet.sample_id,
-            s_fb_multi.sample_id,
-            s_fb_single.sample_id,
-            s_fb_task.sample_id
+            s_fb_task.sample_id,
+            s_fb_idx.sample_id
         ) AS sample_id
 
     FROM equipment_with_context ewc
-    LEFT JOIN equipment_packet_shape eps
-        ON eps.proc_elem_exec_id = ewc.proc_elem_exec_id
     LEFT JOIN hub_owner.sam_sample s_packet
         ON s_packet.sample_id = ewc.packet_sample_id
-    LEFT JOIN fallback_measurements fm_multi
-        ON fm_multi.context_id = ewc.context_id
-       AND fm_multi.derived_item_index = ewc.item_index
-       AND s_packet.id IS NULL
-       AND NVL(eps.max_item_index, 0) > 0
-    LEFT JOIN hub_owner.sam_sample s_fb_multi
-        ON s_fb_multi.id = fm_multi.mapped_sample_id
-    LEFT JOIN fallback_measurements fm_single
-        ON fm_single.context_id = ewc.context_id
-       AND s_packet.id IS NULL
-       AND s_fb_multi.id IS NULL
-       AND NVL(eps.max_item_index, 0) = 0
-    LEFT JOIN hub_owner.sam_sample s_fb_single
-        ON s_fb_single.id = fm_single.mapped_sample_id
+
+    /* Most important mapping change:
+       if this equipment row has the same item_index as the task sample list, use that first.
+       This keeps S1/S2/S3 rows attached to the exact task sample instead of relying on measurement ordering. */
     LEFT JOIN task_samples ts_fb
         ON ts_fb.proc_exec_id = ewc.proc_exec_id
        AND ts_fb.item_index = ewc.item_index
     LEFT JOIN hub_owner.sam_sample s_fb_task
         ON s_fb_task.sample_id = ts_fb.sample_id
        AND s_packet.id IS NULL
-       AND s_fb_multi.id IS NULL
-       AND s_fb_single.id IS NULL
+
+    LEFT JOIN fallback_measurements fm_idx
+        ON fm_idx.context_id = ewc.context_id
+       AND fm_idx.derived_item_index = ewc.item_index
+       AND s_packet.id IS NULL
+       AND s_fb_task.id IS NULL
+    LEFT JOIN hub_owner.sam_sample s_fb_idx
+        ON s_fb_idx.id = fm_idx.mapped_sample_id
 ),
 
 manual_results AS (
@@ -644,7 +662,7 @@ manual_results AS (
 
     WHERE pv.value_key = 'A'
       AND s.sample_id IS NOT NULL
-      AND ms.sample_id != 'planned'
+      AND NVL(ms.sample_id, 'x') != 'planned'
       AND p.display_name != 'Sample'
       AND p.value_type NOT IN ('Vocabulary')
       AND pv.value_string IS NOT NULL
@@ -717,8 +735,9 @@ equipment_results_raw AS (
         ON cs.id = coi_sample.collaborative_space_id
 
     WHERE cs.id = '5FD74EE88C024C2EB908BCE0E176B0E8'
-      AND ms.sample_id != 'planned'
+      AND NVL(ms.sample_id, 'x') != 'planned'
       AND er.value_numeric IS NOT NULL
+      AND er.sample_raw_id IS NOT NULL
 ),
 
 equipment_results AS (
@@ -811,6 +830,8 @@ equipment_file_packet_scope AS (
         dp.name AS data_packet_name
 
     FROM hub_owner.sam_sample s
+    JOIN valid_process_samples vps
+        ON vps.sample_id = s.sample_id
     JOIN hub_owner.res_measurementsample rms
         ON rms.mapped_sample_id = s.id
     JOIN hub_owner.res_measurement rm
@@ -879,38 +900,23 @@ equipment_file_values_raw AS (
         eft.file_size,
         eft.file_date_created,
         eft.file_last_updated,
-
         REGEXP_SUBSTR(
             eft.file_text,
             'Data,[^,]*,([^,]*),' || eft.instrument_sample_id || ',',
-            1,
-            1,
-            'i',
-            1
+            1, 1, 'i', 1
         ) AS csv_data_id,
-
         eft.instrument_sample_id AS csv_sample_id,
-
         REGEXP_SUBSTR(
             eft.file_text,
             'Data,[^,]*,[^,]*,' || eft.instrument_sample_id || ',([^,]*),',
-            1,
-            1,
-            'i',
-            1
+            1, 1, 'i', 1
         ) AS csv_meter_number,
-
         REGEXP_SUBSTR(
             eft.file_text,
             'Data,[^,]*,[^,]*,' || eft.instrument_sample_id || ',[^,]*,(-?[0-9]+(\.[0-9]+)?)',
-            1,
-            1,
-            'i',
-            1
+            1, 1, 'i', 1
         ) AS csv_ov_meter_reading,
-
         CAST(NULL AS VARCHAR2(255)) AS csv_sampling_point_time
-
     FROM equipment_file_text eft
     WHERE REGEXP_LIKE(
         eft.file_text,
@@ -935,13 +941,11 @@ equipment_file_values AS (
         csv_sample_id,
         csv_meter_number,
         csv_sampling_point_time,
-
         TO_NUMBER(
             csv_ov_meter_reading,
             '9999999990D999999',
             'NLS_NUMERIC_CHARACTERS=.,'
         ) AS ov_meter_reading
-
     FROM equipment_file_values_raw
     WHERE REGEXP_LIKE(csv_ov_meter_reading, '^-?[0-9]+(\.[0-9]+)?$')
     GROUP BY
@@ -987,10 +991,7 @@ equipment_file_results AS (
         (
             SELECT MAX(proj2.name) KEEP (
                 DENSE_RANK FIRST ORDER BY
-                    CASE
-                        WHEN rs2.date_created <= NVL(f.measurement_last_updated, SYSDATE) THEN 0
-                        ELSE 1
-                    END,
+                    CASE WHEN rs2.date_created <= NVL(f.measurement_last_updated, SYSDATE) THEN 0 ELSE 1 END,
                     rs2.date_created DESC
             )
             FROM task_samples ts2
@@ -1004,10 +1005,7 @@ equipment_file_results AS (
         (
             SELECT MAX(rs2.runset_id) KEEP (
                 DENSE_RANK FIRST ORDER BY
-                    CASE
-                        WHEN rs2.date_created <= NVL(f.measurement_last_updated, SYSDATE) THEN 0
-                        ELSE 1
-                    END,
+                    CASE WHEN rs2.date_created <= NVL(f.measurement_last_updated, SYSDATE) THEN 0 ELSE 1 END,
                     rs2.date_created DESC
             )
             FROM task_samples ts2
@@ -1019,10 +1017,7 @@ equipment_file_results AS (
         (
             SELECT MAX(rs2.date_created) KEEP (
                 DENSE_RANK FIRST ORDER BY
-                    CASE
-                        WHEN rs2.date_created <= NVL(f.measurement_last_updated, SYSDATE) THEN 0
-                        ELSE 1
-                    END,
+                    CASE WHEN rs2.date_created <= NVL(f.measurement_last_updated, SYSDATE) THEN 0 ELSE 1 END,
                     rs2.date_created DESC
             )
             FROM task_samples ts2
@@ -1035,10 +1030,7 @@ equipment_file_results AS (
             (
                 SELECT MAX(ts2.task_status) KEEP (
                     DENSE_RANK FIRST ORDER BY
-                        CASE
-                            WHEN rs2.date_created <= NVL(f.measurement_last_updated, SYSDATE) THEN 0
-                            ELSE 1
-                        END,
+                        CASE WHEN rs2.date_created <= NVL(f.measurement_last_updated, SYSDATE) THEN 0 ELSE 1 END,
                         rs2.date_created DESC
                 )
                 FROM task_samples ts2
@@ -1050,28 +1042,20 @@ equipment_file_results AS (
         ) AS "Task Status",
 
         'ov_meter_reading' AS "Characteristic",
-
         TO_CHAR(f.ov_meter_reading) AS "Result",
-
         TO_CHAR(
             f.ov_meter_reading,
             'FM9999999990.0000',
             'NLS_NUMERIC_CHARACTERS=.,'
         ) AS "Formatted result",
-
         f.measurement_last_updated AS "Result entered",
-
         'EQUIPMENT' AS "Result Source",
-
         'percent' AS "UOM",
 
         (
             SELECT MAX(rp2.tp_project_plan) KEEP (
                 DENSE_RANK FIRST ORDER BY
-                    CASE
-                        WHEN rs2.date_created <= NVL(f.measurement_last_updated, SYSDATE) THEN 0
-                        ELSE 1
-                    END,
+                    CASE WHEN rs2.date_created <= NVL(f.measurement_last_updated, SYSDATE) THEN 0 ELSE 1 END,
                     rs2.date_created DESC
             )
             FROM task_samples ts2
@@ -1095,7 +1079,6 @@ equipment_file_results AS (
         ON coi_sample.object_id = s.id
     LEFT JOIN hub_owner.sec_collab_space cs
         ON cs.id = coi_sample.collaborative_space_id
-
     WHERE cs.id = '5FD74EE88C024C2EB908BCE0E176B0E8'
       AND NVL(ms.sample_id, 'x') != 'planned'
 )
