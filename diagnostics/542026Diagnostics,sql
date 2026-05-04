@@ -719,3 +719,55 @@ ORDER BY
     cp.display_name,
     cp.name,
     cpv.last_updated DESC;
+
+    --file
+    /* ============================================================
+   DIAGNOSTIC E:
+   Read the actual uploaded equipment CSV from FILE_CONTENT.
+
+   This should expose the rows containing:
+   Sample_Id, Sampling_Point_Time, OV_Meter_Reading,
+   Meter_Number, Data_Id
+
+   Key point:
+   FILE_METADATA.STORAGE_TYPE = 'DATABASE'
+   FILE_CONTENT.CONTENT is the actual file BLOB.
+   ============================================================ */
+
+WITH exact_files AS (
+    SELECT DISTINCT
+        fm.id,
+        fm.name,
+        fm.file_size,
+        fm.date_created,
+        fm.last_updated,
+        fm.mime_type,
+        fm.storage_type
+    FROM file_metadata fm
+    WHERE fm.name IN (
+        '268_Exit AC Flavor Cyl. #3_04-16-2026-FARRENJC.csv',
+        '234_Enter Burley Spray #4_03-24-2026-FARRENJC.csv',
+        '268_Exit AC Flavor Cyl. #3_04-09-2026-BAUMGAB.csv',
+        '268_Exit AC Flavor Cyl. #3_04-09-2026-GODWINWS.csv'
+    )
+)
+SELECT
+    RAWTOHEX(ef.id) AS file_metadata_id,
+    ef.name AS file_name,
+    ef.file_size,
+    ef.date_created,
+    ef.last_updated,
+    ef.mime_type,
+    ef.storage_type,
+    DBMS_LOB.GETLENGTH(fc.content) AS blob_length,
+
+    UTL_RAW.CAST_TO_VARCHAR2(
+        DBMS_LOB.SUBSTR(fc.content, 2000, 1)
+    ) AS file_text_snip
+
+FROM exact_files ef
+JOIN file_content fc
+    ON fc.file_id = ef.id
+ORDER BY
+    ef.name,
+    ef.date_created;
