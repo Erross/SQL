@@ -27,8 +27,7 @@ ORDER BY
     rt.task_id;
 
     --sample order debug
-
-    WITH
+WITH
 task_map AS (
     SELECT
         pe.id AS proc_exec_id,
@@ -70,10 +69,12 @@ task_samples AS (
         CONNECT BY LEVEL <= 20
     ) n
         ON n.lvl <= REGEXP_COUNT(tm.sample_list, ',') + 1
+    WHERE REGEXP_SUBSTR(tm.sample_list, '[^,]+', 1, n.lvl) IS NOT NULL
 ),
 
 param_rows AS (
     SELECT
+        tm.proc_exec_id,
         tm.task_id,
         tm.task_name,
         tm.sample_list,
@@ -117,6 +118,7 @@ field_defs AS (
 
 field_values AS (
     SELECT
+        pr.proc_exec_id,
         pr.task_id,
         pr.task_name,
         pr.sample_list,
@@ -198,9 +200,8 @@ SELECT
 
 FROM context_map cm
 LEFT JOIN task_samples ts
-    ON ts.proc_exec_id = (
-        SELECT proc_exec_id FROM task_map WHERE ROWNUM = 1
-    )
+    ON ts.proc_exec_id = cm.proc_exec_id
+   AND ts.task_id = cm.task_id
    AND ts.task_item_index = cm.item_index
 LEFT JOIN hub_owner.sam_sample s_task
     ON s_task.sample_id = ts.task_sample_id
