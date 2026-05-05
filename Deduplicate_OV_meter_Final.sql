@@ -1111,65 +1111,7 @@ equipment_file_results AS (
       AND NVL(ms.sample_id, 'x') != 'planned'
       AND f.context_project_name IS NOT NULL
       AND f.context_task_plan_project_plan IS NOT NULL
-)
-
-SELECT
-    "Sample Name",
-    "Sample ID",
-    "Sample Status",
-    "Master Sample ID",
-    "Sampling point",
-    "Sampling point description",
-    "LINE-1",
-    "Owner",
-    "Product Code",
-    "Product Description",
-    "CIG_PRODUCT_CODE",
-    "CIG_PRODUCT_DESCRIPTION",
-    "Spec_Group",
-    "Task Plan Project",
-    "Task Plan ID",
-    "Task Plan Creation Date",
-    "Task Status",
-    "Characteristic",
-    "Result",
-    "Formatted result",
-    "Result entered",
-    "Result Source",
-    "UOM",
-    "Task Plan Project Plan"
-FROM manual_results
-
-UNION ALL
-
-SELECT
-    "Sample Name",
-    "Sample ID",
-    "Sample Status",
-    "Master Sample ID",
-    "Sampling point",
-    "Sampling point description",
-    "LINE-1",
-    "Owner",
-    "Product Code",
-    "Product Description",
-    "CIG_PRODUCT_CODE",
-    "CIG_PRODUCT_DESCRIPTION",
-    "Spec_Group",
-    "Task Plan Project",
-    "Task Plan ID",
-    "Task Plan Creation Date",
-    "Task Status",
-    "Characteristic",
-    "Result",
-    "Formatted result",
-    "Result entered",
-    "Result Source",
-    "UOM",
-    "Task Plan Project Plan"
-FROM equipment_results
-
-UNION ALL,
+),
 
 all_results AS (
 SELECT
@@ -1256,6 +1198,7 @@ SELECT
     "UOM",
     "Task Plan Project Plan"
 FROM equipment_file_results
+
 ),
 
 ov_meter_readings_ranked AS (
