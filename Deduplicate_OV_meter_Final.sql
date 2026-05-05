@@ -1169,8 +1169,7 @@ SELECT
     "Task Plan Project Plan"
 FROM equipment_results
 
-UNION ALL
-,
+UNION ALL,
 
 all_results AS (
 SELECT
