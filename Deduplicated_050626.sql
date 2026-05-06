@@ -1198,7 +1198,25 @@ SELECT
     "UOM",
     "Task Plan Project Plan"
 FROM equipment_file_results
+),
 
+all_results_zero_screened AS (
+    SELECT ar.*
+    FROM all_results ar
+    WHERE NOT (
+        LOWER(ar."Characteristic") = 'ov_meter_reading'
+        AND REGEXP_LIKE(ar."Result", '^-?[0-9]+(\.[0-9]+)?$')
+        AND ABS(TO_NUMBER(ar."Result")) = 0
+        AND EXISTS (
+            SELECT 1
+            FROM all_results ar2
+            WHERE ar2."Task Plan ID" = ar."Task Plan ID"
+              AND ar2."Sample ID" = ar."Sample ID"
+              AND LOWER(ar2."Characteristic") = 'ov_meter_reading'
+              AND REGEXP_LIKE(ar2."Result", '^-?[0-9]+(\.[0-9]+)?$')
+              AND ABS(TO_NUMBER(ar2."Result")) <> 0
+        )
+    )
 )
 
 SELECT DISTINCT
@@ -1225,4 +1243,4 @@ SELECT DISTINCT
     "Result Source",
     "UOM",
     "Task Plan Project Plan"
-FROM all_results
+FROM all_results_zero_screened
